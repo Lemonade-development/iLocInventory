@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
-/** Nombre del repo en GitHub (chelexwe1812/iLocInventory). */
+/** Nombre del repo en GitHub (Lemonade-development/iLocInventory). */
 const GITHUB_REPO = 'iLocInventory'
 const isGitHubPages = process.env.GITHUB_PAGES === 'true'
 const base = isGitHubPages ? `/${GITHUB_REPO}/` : '/'
