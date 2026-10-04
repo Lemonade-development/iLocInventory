@@ -222,6 +222,7 @@ function detailRow(label: string, value: string | number | undefined | null) {
                   <p class="mt-1 text-lg font-semibold text-zinc-100">
                     {{ formatCurrency(product.cost) }}
                   </p>
+                  <UsdEquivalent v-if="product.cost > 0" :bs="product.cost" class="mt-0.5 block" />
                 </div>
                 <div class="rounded-lg bg-surface-overlay p-3">
                   <p class="text-xs text-zinc-500">Margen</p>

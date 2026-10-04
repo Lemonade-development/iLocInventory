@@ -19,6 +19,7 @@ import {
   User,
   Smartphone,
   FileSpreadsheet,
+  RefreshCw,
 } from 'lucide-vue-next'
 import { useStorage } from '@/composables/useStorage'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
@@ -30,7 +31,7 @@ import {
   buildBackupData,
   type BackupFailure,
 } from '@/composables/useCloudBackup'
-import { formatDateTime, todayIsoDate } from '@/utils/format'
+import { formatDate, formatDateTime, todayIsoDate } from '@/utils/format'
 import { useProductsStore } from '@/stores/products'
 import { useSalesStore } from '@/stores/sales'
 import { useAppStore } from '@/stores/app'
@@ -46,7 +47,17 @@ import InventoryImportModal from '@/components/inventory/InventoryImportModal.vu
 
 const { backend, importData } = useStorage()
 const { preference, setTheme } = useTheme()
-const { exchangeRate, showUsd, setExchangeRate, setShowUsd } = useCurrency()
+const {
+  exchangeRate,
+  showUsd,
+  setExchangeRate,
+  setShowUsd,
+  autoRate,
+  rateUpdatedAt,
+  refreshingRate,
+  setAutoRate,
+  refreshOfficialRate,
+} = useCurrency()
 const { autoPrint, setAutoPrint } = usePrintSettings()
 const {
   name: storeName,
@@ -95,6 +106,26 @@ function saveStoreInfo() {
 
 // Borrador editable del tipo de cambio; se confirma al salir del input.
 const rateDraft = ref(String(exchangeRate.value))
+
+// La cotización automática cambia el valor: el borrador la sigue.
+watch(exchangeRate, (rate) => {
+  rateDraft.value = String(rate)
+})
+
+async function handleToggleAutoRate() {
+  const result = await setAutoRate(!autoRate.value)
+  if (result && !result.ok) {
+    appStore.showToast(`No se pudo obtener el dólar oficial: ${result.error}. Se mantiene ${exchangeRate.value} Bs.`, 'error')
+  } else if (result?.ok) {
+    appStore.showToast(`Dólar oficial: ${result.rate} Bs`, 'success')
+  }
+}
+
+async function handleRefreshRate() {
+  const result = await refreshOfficialRate({ force: true })
+  if (result.ok) appStore.showToast(`Dólar oficial actualizado: ${result.rate} Bs`, 'success')
+  else appStore.showToast(`No se pudo obtener el dólar oficial: ${result.error}`, 'error')
+}
 
 function commitRate() {
   const parsed = Number.parseFloat(rateDraft.value)
@@ -555,15 +586,38 @@ async function handleImportJson(event: Event) {
       </div>
       <p class="mb-4 text-sm text-zinc-500">
         Todos los montos se registran en Bolivianos (Bs). Opcionalmente puedes mostrar su
-        equivalente en dólares usando un tipo de cambio configurable.
+        equivalente en dólares con el tipo de cambio oficial o uno manual.
       </p>
 
       <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-zinc-300">Dólar oficial automático</p>
+            <p class="text-xs text-zinc-500">
+              Toma cada día el tipo de cambio oficial del Banco Central de Bolivia (vía DolarApi).
+              Sin internet se mantiene el último valor.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="autoRate"
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition"
+            :class="autoRate ? 'bg-accent' : 'bg-surface-overlay border border-border'"
+            @click="handleToggleAutoRate"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+              :class="autoRate ? 'translate-x-6' : 'translate-x-1'"
+            />
+          </button>
+        </div>
+
         <div>
           <label for="exchange-rate" class="mb-1.5 block text-sm text-zinc-400">
             Tipo de cambio actual
           </label>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm text-zinc-500">1 USD =</span>
             <input
               id="exchange-rate"
@@ -572,18 +626,37 @@ async function handleImportJson(event: Event) {
               step="0.01"
               min="0"
               inputmode="decimal"
-              class="w-28 rounded-lg border border-border bg-surface-overlay px-3 py-2 text-sm text-zinc-200 outline-none focus:border-accent"
+              :disabled="autoRate"
+              class="w-28 rounded-lg border border-border bg-surface-overlay px-3 py-2 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-60"
               @blur="commitRate"
               @keydown.enter="commitRate"
             />
             <span class="text-sm text-zinc-500">Bs</span>
+            <button
+              v-if="autoRate"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-surface-overlay hover:text-zinc-200 disabled:opacity-50"
+              :disabled="refreshingRate"
+              @click="handleRefreshRate"
+            >
+              <RefreshCw :size="13" :class="{ 'animate-spin': refreshingRate }" />
+              {{ refreshingRate ? 'Consultando...' : 'Actualizar ahora' }}
+            </button>
           </div>
+          <p class="mt-1.5 text-xs text-zinc-500">
+            <template v-if="autoRate">
+              {{ rateUpdatedAt ? `Cotización oficial del ${formatDate(rateUpdatedAt.slice(0, 10))}` : 'Aún sin consultar la cotización oficial' }}
+            </template>
+            <template v-else>Manual: escribe el valor y se usa en las ventas nuevas.</template>
+          </p>
         </div>
 
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm text-zinc-300">Mostrar equivalente en USD</p>
-            <p class="text-xs text-zinc-500">Añade el monto en dólares junto a los precios en Bs.</p>
+            <p class="text-xs text-zinc-500">
+              Solo en la app, para uso interno. Las notas de venta y los comprobantes no lo incluyen.
+            </p>
           </div>
           <button
             type="button"

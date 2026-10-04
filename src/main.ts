@@ -6,6 +6,7 @@ import router from './router'
 import { useAuth } from './composables/useAuth'
 import { useStorage } from './composables/useStorage'
 import { useTheme } from './composables/useTheme'
+import { startOfficialRateAutoRefresh } from './composables/useCurrency'
 import './style.css'
 
 const app = createApp(App)
@@ -16,6 +17,9 @@ app.use(router)
 
 // Inicializa el tema (aplica preferencia guardada y escucha cambios del sistema).
 useTheme()
+
+// Dólar oficial del día (si está en automático); sin internet queda el último.
+startOfficialRateAutoRefresh()
 
 const { initialize } = useStorage()
 const { init: initAuth } = useAuth()
