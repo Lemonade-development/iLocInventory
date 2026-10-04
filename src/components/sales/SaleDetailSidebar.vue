@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { X, User, Phone, Calendar, StickyNote, Pencil, KeyRound, Wallet, RotateCcw } from 'lucide-vue-next'
 import type { Sale } from '@/types'
-import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDate, formatDateTime, formatSaleDate } from '@/utils/format'
 import { imeiDisplayLines } from '@/utils/imei'
 import { saleNoteProductName } from '@/utils/product'
 import {
@@ -87,6 +87,13 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
                   Venta #{{ sale.id.slice(0, 8).toUpperCase() }}
                 </p>
                 <span
+                  v-if="sale.importKey"
+                  class="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px] font-medium text-zinc-400"
+                  title="Venta importada desde la planilla histórica"
+                >
+                  Importada
+                </span>
+                <span
                   class="rounded px-1.5 py-0.5 text-[10px] font-medium"
                   :class="
                     pendingBalance > 0
@@ -111,7 +118,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
               </div>
               <p class="mt-1 flex items-center gap-1.5 text-sm text-zinc-400">
                 <Calendar :size="13" />
-                {{ formatDateTime(sale.date) }}
+                {{ formatSaleDate(sale) }}
               </p>
             </div>
             <button

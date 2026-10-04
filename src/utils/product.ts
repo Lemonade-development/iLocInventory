@@ -121,3 +121,22 @@ export function matchesProductSearch(product: Product, query: string): boolean {
   const text = productSearchText(product)
   return words.every((word) => text.includes(word))
 }
+
+/**
+ * Identifica un producto: marca, modelo, variante, condición y, en usados, la
+ * batería. Sin importar mayúsculas ni acentos. La usan la importación de
+ * inventario y la recepción de órdenes de compra para no duplicar productos.
+ */
+export function productMatchKey(p: {
+  brand: string
+  model: string
+  variant?: string
+  condition?: ProductCondition
+  batteryHealth?: unknown
+}): string {
+  const condition = p.condition ?? 'nuevo'
+  const battery = condition === 'segunda_mano' ? (parseBatteryHealth(p.batteryHealth) ?? '') : ''
+  return [p.brand, p.model, p.variant ?? '', condition, battery]
+    .map((part) => normalizeSearch(String(part)).replace(/\s+/g, ' ').trim())
+    .join('|')
+}

@@ -11,29 +11,75 @@ import SalesBulkBar from '@/components/sales/SalesBulkBar.vue'
 import TableToolbar from '@/components/common/TableToolbar.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import { usePagination } from '@/composables/usePagination'
-import { Plus } from 'lucide-vue-next'
+import { Plus, SlidersHorizontal, Upload } from 'lucide-vue-next'
+import SegmentedControl from '@/components/common/SegmentedControl.vue'
+import SalesImportModal from '@/components/sales/SalesImportModal.vue'
 import { downloadSaleReceipts, printSaleReceipts } from '@/services/pdfDownload'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useSalesStore } from '@/stores/sales'
 import { formatCurrency } from '@/utils/format'
-import { format, subDays } from 'date-fns'
+import { format, startOfMonth, startOfWeek, startOfYear } from 'date-fns'
 
 const salesStore = useSalesStore()
 
+type Period = 'all' | 'year' | 'month' | 'week'
+const DEFAULT_PERIOD: Period = 'month'
+
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: 'all', label: 'Todo' },
+  { value: 'year', label: 'Este año' },
+  { value: 'month', label: 'Este mes' },
+  { value: 'week', label: 'Esta semana' },
+]
+
+/** Desde qué día cuenta cada período; "Todo" no tiene límite. */
+function periodStart(p: Period): string {
+  const today = new Date()
+  if (p === 'year') return format(startOfYear(today), 'yyyy-MM-dd')
+  if (p === 'month') return format(startOfMonth(today), 'yyyy-MM-dd')
+  if (p === 'week') return format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  return ''
+}
+
+/** 'custom' = fechas del filtro avanzado; ningún período queda marcado. */
+const period = ref<Period | 'custom'>(DEFAULT_PERIOD)
+const advancedOpen = ref(false)
+
 const filters = ref<SaleFilters>({
   search: '',
-  dateFrom: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-  dateTo: format(new Date(), 'yyyy-MM-dd'),
+  dateFrom: periodStart(DEFAULT_PERIOD),
+  dateTo: '',
 })
 
-const hasActiveFilters = computed(
-  () => !!filters.value.search.trim() || !!filters.value.dateFrom || !!filters.value.dateTo,
-)
+function selectPeriod(p: Period | 'custom') {
+  period.value = p
+  if (p === 'custom') return
+  filters.value.dateFrom = periodStart(p)
+  filters.value.dateTo = ''
+}
+
+/** Editar una fecha del filtro avanzado reemplaza al período rápido. */
+function onAdvancedDate() {
+  period.value = 'custom'
+}
+
+const hasActiveFilters = computed(() => !!filters.value.search.trim() || period.value !== DEFAULT_PERIOD)
+
+/** Vuelve al inicio: sin búsqueda y con las ventas de este mes. */
+function clearFilters() {
+  filters.value.search = ''
+  advancedOpen.value = false
+  selectPeriod(DEFAULT_PERIOD)
+}
 
 /** Sin búsqueda y sin fechas: muestra todas las ventas. */
-function clearFilters() {
-  filters.value = { search: '', dateFrom: '', dateTo: '' }
+function showAll() {
+  filters.value.search = ''
+  advancedOpen.value = false
+  selectPeriod('all')
 }
+
+const importOpen = ref(false)
 
 const PAYMENT_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
@@ -136,14 +182,36 @@ onMounted(() => salesStore.loadSales())
       @clear="clearFilters"
     >
       <template #filters>
-        <div class="flex items-center gap-2 text-sm text-zinc-400">
+        <SegmentedControl :model-value="period" :options="PERIOD_OPTIONS" @update:model-value="selectPeriod" />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition"
+          :class="
+            advancedOpen || period === 'custom'
+              ? 'border-accent text-accent'
+              : 'border-border text-zinc-400 hover:text-zinc-100'
+          "
+          @click="advancedOpen = !advancedOpen"
+        >
+          <SlidersHorizontal :size="15" />
+          Filtro avanzado
+        </button>
+        <div v-if="advancedOpen" class="flex items-center gap-2 text-sm text-zinc-400">
           <span>Desde</span>
-          <input v-model="filters.dateFrom" type="date" class="toolbar-control" />
+          <input v-model="filters.dateFrom" type="date" class="toolbar-control" @input="onAdvancedDate" />
           <span>Hasta</span>
-          <input v-model="filters.dateTo" type="date" class="toolbar-control" />
+          <input v-model="filters.dateTo" type="date" class="toolbar-control" @input="onAdvancedDate" />
         </div>
       </template>
       <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
+          @click="importOpen = true"
+        >
+          <Upload :size="16" />
+          Importar
+        </button>
         <RouterLink
           :to="{ name: 'sales' }"
           class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
@@ -155,7 +223,7 @@ onMounted(() => salesStore.loadSales())
       <template #summary>
         <span>
           {{ filteredSales.length }}
-          <template v-if="hasActiveFilters">de {{ salesStore.sales.length }}</template>
+          <template v-if="filteredSales.length !== salesStore.sales.length">de {{ salesStore.sales.length }}</template>
           venta(s)
         </span>
         <span v-if="pendingSales.length > 0" class="text-warning">
@@ -182,8 +250,8 @@ onMounted(() => salesStore.loadSales())
       :sales="pagedSales"
       :dir-for="dirFor"
       :active-id="selectedSale?.id"
-      :filtered="hasActiveFilters && salesStore.sales.length > 0"
-      @clear-filters="clearFilters"
+      :filtered="(hasActiveFilters || period !== 'all') && salesStore.sales.length > 0"
+      @clear-filters="showAll"
       @select="openSale"
       @sort="toggleSort"
     />
@@ -205,5 +273,7 @@ onMounted(() => salesStore.loadSales())
     <SaleEditModal v-model="editOpen" :sale="selectedSale" @saved="onSaleSaved" />
     <CreditPaymentModal v-model="payOpen" :sale="selectedSale" @saved="onSaleSaved" />
     <SaleReturnModal v-model="returnOpen" :sale="selectedSale" @saved="onSaleSaved" />
+    <!-- Las ventas importadas son viejas: se quitan las fechas para verlas. -->
+    <SalesImportModal v-model="importOpen" @imported="showAll" />
   </div>
 </template>

@@ -161,6 +161,8 @@ export interface Sale {
   /** Cuenta Apple entregada al cliente. Opcional. */
   appleAccount?: AppleAccount
   notes?: string
+  /** Venta importada desde la planilla histórica; identifica la fila para no duplicarla. */
+  importKey?: string
   createdAt: string
 }
 

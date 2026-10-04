@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { CreditPayment, PurchaseOrder, Sale, SaleReturn } from '@/types'
-import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDate, formatDateTime, formatSaleDate } from '@/utils/format'
 import { CONDITION_LABELS, saleNoteProductName } from '@/utils/product'
 import { useCurrency } from '@/composables/useCurrency'
 import { useStoreInfo } from '@/composables/useStoreInfo'
@@ -55,7 +55,7 @@ function drawSaleReceipt(doc: jsPDF, sale: Sale): number {
   doc.setFontSize(7)
   doc.text(`Ticket #${sale.id.slice(0, 8).toUpperCase()}`, 5, y)
   y += 4
-  doc.text(formatDateTime(sale.date), 5, y)
+  doc.text(formatSaleDate(sale), 5, y)
   y += 6
 
   if (sale.customerName) {

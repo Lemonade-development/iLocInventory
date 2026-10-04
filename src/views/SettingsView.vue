@@ -4,7 +4,6 @@ import {
   Download,
   Upload,
   Database,
-  RefreshCw,
   Palette,
   Sun,
   Moon,
@@ -19,8 +18,8 @@ import {
   Shield,
   User,
   Smartphone,
+  FileSpreadsheet,
 } from 'lucide-vue-next'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useStorage } from '@/composables/useStorage'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useCurrency } from '@/composables/useCurrency'
@@ -42,8 +41,10 @@ import { PASSWORD_REQUIREMENTS_HINT, USERNAME_REQUIREMENTS_HINT } from '@/servic
 import UsernameInputForm from '@/components/auth/UsernameInputForm.vue'
 import type { ExportData } from '@/services/storage'
 import { addMissingIphoneCatalog } from '@/services/seed'
+import SalesImportModal from '@/components/sales/SalesImportModal.vue'
+import InventoryImportModal from '@/components/inventory/InventoryImportModal.vue'
 
-const { backend, importData, resetData } = useStorage()
+const { backend, importData } = useStorage()
 const { preference, setTheme } = useTheme()
 const { exchangeRate, showUsd, setExchangeRate, setShowUsd } = useCurrency()
 const { autoPrint, setAutoPrint } = usePrintSettings()
@@ -294,9 +295,10 @@ const themeOptions: { value: ThemePreference; label: string; icon: typeof Sun }[
   { value: 'system', label: 'Sistema', icon: Monitor },
 ]
 
-const showResetConfirm = ref(false)
 const importing = ref(false)
 const loadingCatalog = ref(false)
+const showSalesImport = ref(false)
+const showInventoryImport = ref(false)
 
 async function handleLoadCatalog() {
   loadingCatalog.value = true
@@ -387,19 +389,6 @@ async function handleImportJson(event: Event) {
   } finally {
     importing.value = false
     input.value = ''
-  }
-}
-
-async function handleReset() {
-  try {
-    await resetData()
-    await Promise.all([
-      productsStore.loadProducts(),
-      salesStore.loadSales(),
-    ])
-    appStore.showToast('Datos restablecidos al estado inicial', 'success')
-  } catch {
-    appStore.showToast('Error al restablecer', 'error')
   }
 }
 </script>
@@ -769,6 +758,37 @@ async function handleReset() {
           </p>
         </div>
       </button>
+      <button
+        type="button"
+        class="mt-3 flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay"
+        @click="showSalesImport = true"
+      >
+        <FileSpreadsheet :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">Importar ventas desde planilla</p>
+          <p class="text-xs text-zinc-500">
+            Registro de ventas en .ods, .xlsx o .csv. Crea las ventas históricas y sus clientes,
+            sin tocar el stock. Muestra una vista previa antes de guardar.
+          </p>
+        </div>
+      </button>
+      <button
+        type="button"
+        class="mt-3 flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay"
+        @click="showInventoryImport = true"
+      >
+        <FileSpreadsheet :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">Carga inicial de inventario</p>
+          <p class="text-xs text-zinc-500">
+            Descargá la plantilla, completala y subila para cargar lo que ya tenés en el local.
+            Crea productos nuevos y actualiza precio, costo y stock de los existentes. La
+            reposición con proveedor va por Órdenes de compra.
+          </p>
+        </div>
+      </button>
+      <SalesImportModal v-model="showSalesImport" />
+      <InventoryImportModal v-model="showInventoryImport" />
     </section>
 
     <section class="rounded-xl border border-border bg-surface-raised p-6">
@@ -815,30 +835,6 @@ async function handleReset() {
         </label>
       </div>
     </section>
-
-    <section class="rounded-xl border border-danger/30 bg-danger/5 p-6">
-      <h2 class="mb-2 text-sm font-medium text-danger">Zona de peligro</h2>
-      <p class="mb-4 text-sm text-zinc-400">
-        Restablece la base de datos al estado inicial: solo el catálogo de iPhone, sin ventas, contactos ni compras. Se perderán todos los datos actuales.
-      </p>
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-danger/50 px-4 py-2 text-sm text-danger transition hover:bg-danger/10"
-        @click="showResetConfirm = true"
-      >
-        <RefreshCw :size="16" />
-        Restablecer datos iniciales
-      </button>
-    </section>
-
-    <ConfirmDialog
-      v-model="showResetConfirm"
-      title="Restablecer datos"
-      message="¿Estás seguro? Se eliminarán todos los datos y se cargará solo el catálogo de iPhone."
-      confirm-label="Restablecer"
-      variant="danger"
-      @confirm="handleReset"
-    />
 
     <AppModal v-model="showChangeUsernameModal" title="Cambiar usuario" size="sm">
       <p class="mb-4 text-sm text-zinc-500">{{ USERNAME_REQUIREMENTS_HINT }}</p>

@@ -1,6 +1,5 @@
 import { ref, shallowRef } from 'vue'
 import {
-  clearAllData,
   exportAllData,
   getStorageBackend,
   importAllData,
@@ -41,11 +40,6 @@ export function useStorage() {
     await importAllData(data, replace)
   }
 
-  async function resetData(): Promise<void> {
-    await clearAllData()
-    await seedDatabaseIfNeeded()
-  }
-
   return {
     ready,
     loading,
@@ -54,6 +48,5 @@ export function useStorage() {
     initialize,
     exportData,
     importData,
-    resetData,
   }
 }

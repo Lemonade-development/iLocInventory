@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { X, Pencil, Phone, Calendar, StickyNote, ShoppingBag, ClipboardList, ChevronRight } from 'lucide-vue-next'
 import type { Contact, PurchaseOrder, Sale } from '@/types'
-import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDate, formatSaleDate } from '@/utils/format'
 import { saleNoteProductName } from '@/utils/product'
 import {
   PURCHASE_ORDER_STATUS_COLORS as statusColors,
@@ -183,7 +183,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
                     @click="emit('openSale', sale)"
                   >
                     <span class="flex items-center justify-between gap-3">
-                      <span class="text-zinc-400">{{ formatDateTime(sale.date) }}</span>
+                      <span class="text-zinc-400">{{ formatSaleDate(sale) }}</span>
                       <span class="flex items-center gap-1">
                         <span
                           class="font-medium"

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { FileDown, Printer } from 'lucide-vue-next'
 import type { Sale } from '@/types'
-import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDate, formatSaleDate } from '@/utils/format'
 import { saleNoteProductName } from '@/utils/product'
 import { downloadSaleReceipt, printSaleReceipt } from '@/services/pdfDownload'
 import SortableTh from '@/components/common/SortableTh.vue'
@@ -139,7 +139,16 @@ function pendingBalance(sale: Sale): number {
           <td class="py-3 px-1.5" @click.stop>
             <RowActionsMenu :items="saleActions" @select="runAction(sale, $event)" />
           </td>
-          <td class="whitespace-nowrap px-4 py-3 text-zinc-300">{{ formatDateTime(sale.date) }}</td>
+          <td class="whitespace-nowrap px-4 py-3 text-zinc-300">
+            {{ formatSaleDate(sale) }}
+            <span
+              v-if="sale.importKey"
+              class="ml-1 rounded bg-surface-overlay px-1.5 py-0.5 text-[10px] font-medium text-zinc-400"
+              title="Venta importada desde la planilla histórica"
+            >
+              Importada
+            </span>
+          </td>
           <td class="px-4 py-3">
             <p class="text-zinc-200">{{ sale.customerName ?? '—' }}</p>
             <p v-if="sale.customerPhone" class="text-xs text-zinc-500">{{ sale.customerPhone }}</p>

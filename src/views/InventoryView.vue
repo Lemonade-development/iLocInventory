@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Plus, Filter } from 'lucide-vue-next'
+import { Plus, Filter, Upload } from 'lucide-vue-next'
+import InventoryImportModal from '@/components/inventory/InventoryImportModal.vue'
 import InventoryBulkBar from '@/components/inventory/InventoryBulkBar.vue'
 import BulkStockAdjustmentModal from '@/components/inventory/BulkStockAdjustmentModal.vue'
 import type { Product, ProductFilters, ProductFormData, TableSortState } from '@/types'
@@ -249,6 +250,8 @@ async function handleBulkDelete() {
   }
 }
 
+const importOpen = ref(false)
+
 const highlightId = computed(() => route.query.highlight as string | undefined)
 </script>
 
@@ -285,6 +288,15 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
         </label>
       </template>
       <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
+          title="Carga inicial de inventario desde planilla"
+          @click="importOpen = true"
+        >
+          <Upload :size="16" />
+          Carga inicial
+        </button>
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
@@ -387,5 +399,7 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
       variant="danger"
       @confirm="handleBulkDelete"
     />
+
+    <InventoryImportModal v-model="importOpen" />
   </div>
 </template>

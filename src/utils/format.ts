@@ -54,3 +54,7 @@ export function formatDateTime(date: string | Date): string {
     minute: '2-digit',
   }).format(d)
 }
+/** Fecha de una venta. Las importadas de la planilla no tienen hora real: solo la fecha. */
+export function formatSaleDate(sale: { date: string; importKey?: string }): string {
+  return sale.importKey ? formatDate(sale.date) : formatDateTime(sale.date)
+}

@@ -9,12 +9,14 @@ import type {
 import {
   deletePurchaseOrder,
   executeReceivePurchaseOrder,
+  getAllProducts,
   getAllPurchaseOrders,
   getProductById,
   nextPurchaseOrderCode,
   savePurchaseOrder,
 } from '@/services/storage'
 import { generateId } from '@/utils/id'
+import { productMatchKey } from '@/utils/product'
 import { useCurrency } from '@/composables/useCurrency'
 
 /** Cantidades a recibir por índice de línea de la orden */
@@ -174,7 +176,11 @@ export function usePurchaseOrders() {
     const movements: InventoryMovement[] = []
     // Acumula incrementos por producto existente (una misma referencia puede
     // aparecer en varias líneas) partiendo de su stock actual.
-    const stockMap = new Map<string, { base: Product; add: number; cost: number }>()
+    const stockMap = new Map<string, { base: Product; add: number; cost: number; price?: number }>()
+    // Una línea sin vincular se reconoce por marca, modelo, variante y condición:
+    // así recibir "iPhone 13 Pro Azul sierra 256GB" suma al del catálogo en lugar de duplicarlo.
+    const byKey = new Map((await getAllProducts()).map((p) => [productMatchKey(p), p]))
+    const createdByKey = new Map<string, Product>()
 
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx]
@@ -184,16 +190,27 @@ export function usePurchaseOrders() {
       const qty = Math.min(requested, remaining)
       if (qty <= 0) continue
 
-      const existing = item.productId ? await getProductById(item.productId) : undefined
+      const key = productMatchKey(item)
+      const linked = item.productId ? await getProductById(item.productId) : undefined
+      const existing = linked ?? byKey.get(key)
+      const created = existing ? undefined : createdByKey.get(key)
 
       if (existing) {
+        item.productId = existing.id
         const entry = stockMap.get(existing.id) ?? { base: existing, add: 0, cost: item.unitCost }
         entry.add += qty
         entry.cost = item.unitCost
+        // Un producto sin precio (como los del catálogo) toma el precio de venta de la orden.
+        if (!existing.price && item.price) entry.price = item.price
         stockMap.set(existing.id, entry)
+      } else if (created) {
+        // Otra línea de esta misma recepción ya creó el producto.
+        created.stock += qty
+        item.productId = created.id
       } else {
         const product = itemToProduct(item, qty)
         newProducts.push(product)
+        createdByKey.set(key, product)
         // Persiste el vínculo para que recepciones parciales futuras sumen al
         // mismo producto en lugar de crear duplicados.
         item.productId = product.id
@@ -219,6 +236,7 @@ export function usePurchaseOrders() {
       productId: e.base.id,
       stock: e.base.stock + e.add,
       cost: e.cost,
+      ...(e.price ? { price: e.price } : {}),
     }))
 
     const allReceived = items.every((i) => i.receivedQuantity >= i.quantity)
