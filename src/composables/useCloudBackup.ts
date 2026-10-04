@@ -122,7 +122,13 @@ export function useCloudBackup() {
 
     let handle: FileSystemDirectoryHandle
     try {
-      handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'iloc-backup' })
+      // Abre en Documentos: con "Escritorio y Documentos" de iCloud activado es la
+      // carpeta sincronizada que Chrome deja usar en cualquier versión.
+      handle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        id: 'iloc-backup',
+        startIn: 'documents',
+      })
     } catch (error) {
       return { ok: false, reason: classifyPickerError(error), error }
     }

@@ -227,6 +227,8 @@ const {
 } = useCloudBackup()
 
 const backingUp = ref(false)
+/** Se muestra la guía de iCloud cuando el selector se cerró sin carpeta. */
+const showFolderHelp = ref(false)
 
 onMounted(() => {
   void initCloudBackup()
@@ -234,10 +236,9 @@ onMounted(() => {
 
 /** Traduce el motivo del fallo a un mensaje que diga qué hacer. */
 function reportBackupFailure(reason: BackupFailure | undefined): void {
-  if (reason === 'cancelled') return // cerró el selector: no hay nada que avisar
+  if (reason === 'cancelled') return // cerró el selector: la guía queda visible en la tarjeta
   const messages: Record<string, string> = {
-    blocked:
-      'Chrome no permite esa carpeta. Elige una subcarpeta dentro de ella (p. ej. iCloud Drive › iLoc), no la raíz.',
+    blocked: 'Chrome no permite esa carpeta. Sigue los pasos de la tarjeta para usar Documentos › iLoc.',
     permission: 'No se concedió permiso de escritura sobre la carpeta',
     'no-folder': 'Primero elige una carpeta de respaldo',
     unsupported: 'Este navegador no soporta el respaldo a una carpeta. Usa Google Chrome.',
@@ -248,9 +249,13 @@ function reportBackupFailure(reason: BackupFailure | undefined): void {
 async function handleChooseFolder() {
   const result = await chooseFolder()
   if (!result.ok) {
+    // Chrome a veces avisa "contiene archivos del sistema" y luego lo informa como
+    // una cancelación: en ambos casos se ofrece la guía.
+    if (result.reason === 'cancelled' || result.reason === 'blocked') showFolderHelp.value = true
     reportBackupFailure(result.reason)
     return
   }
+  showFolderHelp.value = false
   if (result.persisted) {
     appStore.showToast(`Carpeta de respaldo: ${cloudFolder.value}`, 'success')
   } else {
@@ -659,13 +664,56 @@ async function handleImportJson(event: Event) {
       <template v-if="cloudSupported">
         <p class="mb-2 text-sm text-zinc-500">
           Elige una carpeta que iCloud Drive (o Google Drive) sincronice. La app guardará ahí un
-          respaldo y la nube lo subirá sola. No incluye las fotos de productos.
+          respaldo por día y la nube lo subirá sola. No incluye las fotos de productos.
         </p>
         <p class="mb-4 text-xs text-zinc-500">
           Tiene que ser una <span class="text-zinc-300">subcarpeta</span>: el navegador no deja
-          elegir Escritorio, Documentos, Descargas ni la raíz de iCloud Drive. Crea una dentro
-          (por ejemplo <span class="text-zinc-300">iCloud Drive › iLoc</span>) y elígela.
+          elegir Escritorio, Documentos ni Descargas directamente. Recomendado:
+          <span class="text-zinc-300">Documentos › iLoc</span>, con iCloud sincronizando Documentos.
+          <button
+            v-if="!showFolderHelp"
+            type="button"
+            class="text-accent transition hover:text-accent-hover"
+            @click="showFolderHelp = true"
+          >
+            Ver cómo
+          </button>
         </p>
+
+        <div
+          v-if="showFolderHelp"
+          class="mb-4 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-zinc-400"
+        >
+          <p class="mb-2 font-medium text-zinc-200">¿Chrome no te deja elegir la carpeta de iCloud?</p>
+          <p class="mb-2">
+            Algunas versiones de Chrome (como la de macOS Mojave) bloquean las carpetas de iCloud
+            Drive y muestran "contiene archivos del sistema". No hay un permiso que lo destrabe,
+            pero iCloud puede sincronizar la carpeta Documentos, que Chrome sí acepta:
+          </p>
+          <ol class="list-decimal space-y-1 pl-5">
+            <li>
+              Abre <span class="text-zinc-200">Preferencias del Sistema › iCloud</span> (o
+              <span class="text-zinc-200">ID de Apple › iCloud</span>) y pulsa
+              <span class="text-zinc-200">Opciones…</span> junto a iCloud Drive.
+            </li>
+            <li>
+              Activa <span class="text-zinc-200">Carpetas Escritorio y Documentos</span> y pulsa
+              Aceptar.
+            </li>
+            <li>En Finder, dentro de <span class="text-zinc-200">Documentos</span>, crea una carpeta llamada <span class="text-zinc-200">iLoc</span>.</li>
+            <li>
+              Aquí pulsa <span class="text-zinc-200">Elegir carpeta</span>, entra en Documentos,
+              selecciona <span class="text-zinc-200">iLoc</span> y acepta el permiso de edición.
+            </li>
+          </ol>
+          <button
+            type="button"
+            class="mt-2 text-zinc-500 transition hover:text-zinc-300"
+            @click="showFolderHelp = false"
+          >
+            Ocultar
+          </button>
+        </div>
 
         <div class="space-y-4">
           <div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-overlay px-4 py-3">
