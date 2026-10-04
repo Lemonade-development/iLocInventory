@@ -15,6 +15,7 @@ import RowActionsMenu, { type RowAction } from '@/components/common/RowActionsMe
 import TableEmptyRow from '@/components/common/TableEmptyRow.vue'
 import { ACTIVE_ROW_CLASS } from '@/utils/table'
 import { formatCurrency } from '@/utils/format'
+import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 import { getFileUrl } from '@/services/storage'
 import { COLUMN_WIDTHS } from '@/composables/useInventoryTableLayout'
 import {
@@ -357,7 +358,10 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
                 <AlertTriangle :size="14" />
                 Sin precio
               </span>
-              <span v-else class="text-zinc-200">{{ formatCurrency(product.price) }}</span>
+              <template v-else>
+                <span class="text-zinc-200">{{ formatCurrency(product.price) }}</span>
+                <UsdEquivalent :bs="product.price" class="block" />
+              </template>
             </template>
 
             <!-- Stock -->

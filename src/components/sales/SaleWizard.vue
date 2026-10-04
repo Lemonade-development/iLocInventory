@@ -9,6 +9,7 @@ import { useSalesStore } from '@/stores/sales'
 import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
 import { formatCurrency, formatDate, todayIsoDate } from '@/utils/format'
+import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 import ProductFormModal from '@/components/inventory/ProductFormModal.vue'
 import BatteryHealthBadge from '@/components/inventory/BatteryHealthBadge.vue'
 import { acceptsBatteryHealth } from '@/utils/product'
@@ -535,6 +536,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
               </div>
               <span class="w-24 text-right text-sm font-medium text-zinc-200">
                 {{ formatCurrency(item.product.price * item.quantity) }}
+                <UsdEquivalent :bs="item.product.price * item.quantity" class="block" />
               </span>
               <button
                 type="button"
@@ -636,7 +638,10 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
           <!-- Total -->
           <div class="flex items-center justify-between border-t border-border pt-3">
             <span class="text-sm text-zinc-400">Total</span>
-            <span class="text-xl font-semibold text-zinc-100">{{ formatCurrency(total) }}</span>
+            <span class="text-right text-xl font-semibold text-zinc-100">
+              {{ formatCurrency(total) }}
+              <UsdEquivalent :bs="total" class="block" />
+            </span>
           </div>
         </div>
       </div>
@@ -959,7 +964,10 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
             </div>
             <div class="flex justify-between pt-1">
               <span class="font-medium text-zinc-300">Saldo a pagar</span>
-              <span class="text-xl font-semibold text-accent">{{ formatCurrency(amountDue) }}</span>
+              <span class="text-right text-xl font-semibold text-accent">
+                {{ formatCurrency(amountDue) }}
+                <UsdEquivalent :bs="amountDue" class="block" />
+              </span>
             </div>
           </template>
 
@@ -978,13 +986,19 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
                   <span class="text-xs font-normal text-zinc-500">· vence {{ formatDate(creditDueDate) }}</span>
                 </template>
               </span>
-              <span class="text-xl font-semibold text-warning">{{ formatCurrency(creditBalance) }}</span>
+              <span class="text-right text-xl font-semibold text-warning">
+                {{ formatCurrency(creditBalance) }}
+                <UsdEquivalent :bs="creditBalance" class="block" />
+              </span>
             </div>
           </template>
 
           <div v-else class="flex justify-between pt-1">
             <span class="font-medium text-zinc-300">Total a pagar</span>
-            <span class="text-xl font-semibold text-accent">{{ formatCurrency(total) }}</span>
+            <span class="text-right text-xl font-semibold text-accent">
+              {{ formatCurrency(total) }}
+              <UsdEquivalent :bs="total" class="block" />
+            </span>
           </div>
         </div>
       </div>

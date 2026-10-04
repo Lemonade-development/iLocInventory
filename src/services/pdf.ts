@@ -3,7 +3,6 @@ import autoTable from 'jspdf-autotable'
 import type { CreditPayment, PurchaseOrder, Sale, SaleReturn } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, formatSaleDate } from '@/utils/format'
 import { CONDITION_LABELS, saleNoteProductName } from '@/utils/product'
-import { useCurrency } from '@/composables/useCurrency'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 import { imeiDisplayLines } from '@/utils/imei'
 import { APPLE_ACCOUNT_NOTICE } from '@/utils/appleAccount'
@@ -120,15 +119,6 @@ function drawSaleReceipt(doc: jsPDF, sale: Sale): number {
   doc.text(formatCurrency(sale.total), pageWidth - 5, y, { align: 'right' })
   y += 5
 
-  const { showUsd, formatUsdEquivalent } = useCurrency()
-  if (showUsd.value) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.text(`≈ ${formatUsdEquivalent(sale.total, sale.exchangeRate)}`, pageWidth - 5, y, {
-      align: 'right',
-    })
-    y += 5
-  }
   y += 1
 
   if (sale.tradeInValue && sale.tradeInValue > 0) {
@@ -460,7 +450,6 @@ function drawCreditPaymentReceipt(doc: jsPDF, sale: Sale, index: number): number
   const payment = sale.creditPayments?.[index] as CreditPayment
   const pageWidth = doc.internal.pageSize.getWidth()
   const store = useStoreInfo()
-  const { showUsd, formatUsdEquivalent } = useCurrency()
   let y = 10
 
   doc.setFontSize(12)
@@ -522,14 +511,6 @@ function drawCreditPaymentReceipt(doc: jsPDF, sale: Sale, index: number): number
   doc.setFontSize(10)
   row('ABONO:', formatCurrency(payment.amount))
   y += 5
-  if (showUsd.value) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.text(`≈ ${formatUsdEquivalent(payment.amount, sale.exchangeRate)}`, pageWidth - 5, y, {
-      align: 'right',
-    })
-    y += 5
-  }
   y += 1
 
   if (payment.balanceAfter !== undefined) {

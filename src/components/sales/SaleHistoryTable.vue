@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { FileDown, Printer } from 'lucide-vue-next'
 import type { Sale } from '@/types'
 import { formatCurrency, formatDate, formatSaleDate } from '@/utils/format'
+import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 import { saleNoteProductName } from '@/utils/product'
 import { downloadSaleReceipt, printSaleReceipt } from '@/services/pdfDownload'
 import SortableTh from '@/components/common/SortableTh.vue'
@@ -184,6 +185,7 @@ function pendingBalance(sale: Sale): number {
             <span :class="sale.returnStatus ? 'text-zinc-500 line-through' : ''">
               {{ formatCurrency(sale.total) }}
             </span>
+            <UsdEquivalent :bs="sale.total" :rate="sale.exchangeRate" class="block" />
             <p v-if="(sale.refundedTotal ?? 0) > 0" class="text-xs font-normal text-zinc-400">
               neto {{ formatCurrency(sale.total - (sale.refundedTotal ?? 0)) }}
             </p>
