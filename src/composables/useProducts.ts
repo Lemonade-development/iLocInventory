@@ -6,6 +6,7 @@ import {
   saveProduct,
 } from '@/services/storage'
 import { generateId } from '@/utils/id'
+import { isLowStock, matchesProductSearch } from '@/utils/product'
 
 export function useProducts() {
   const products = ref<Product[]>([])
@@ -23,16 +24,8 @@ export function useProducts() {
   function filterProducts(filters: ProductFilters): Product[] {
     let result = [...products.value]
 
-    if (filters.search) {
-      const q = filters.search.toLowerCase()
-      result = result.filter(
-        (p) =>
-          p.brand.toLowerCase().includes(q) ||
-          p.model.toLowerCase().includes(q) ||
-          p.variant?.toLowerCase().includes(q) ||
-          p.sku?.toLowerCase().includes(q) ||
-          p.imei?.toLowerCase().includes(q),
-      )
+    if (filters.search.trim()) {
+      result = result.filter((p) => matchesProductSearch(p, filters.search))
     }
 
     if (filters.brand) {
@@ -48,7 +41,7 @@ export function useProducts() {
     }
 
     if (filters.lowStockOnly) {
-      result = result.filter((p) => p.stock <= (p.minStock ?? 5))
+      result = result.filter(isLowStock)
     }
 
     if (filters.sortBy && filters.sortDir) {
@@ -76,6 +69,12 @@ export function useProducts() {
       return String(av).localeCompare(String(bv), 'es', { sensitivity: 'base' }) * dir
     }
 
+    if (key === 'batteryHealth') {
+      const av = a.batteryHealth ?? -1
+      const bv = b.batteryHealth ?? -1
+      return (av - bv) * dir
+    }
+
     const av = a[key] ?? ''
     const bv = b[key] ?? ''
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
@@ -85,7 +84,7 @@ export function useProducts() {
   const brands = computed(() => [...new Set(products.value.map((p) => p.brand))].sort())
 
   const lowStockProducts = computed(() =>
-    products.value.filter((p) => p.stock <= (p.minStock ?? 5)),
+    products.value.filter(isLowStock),
   )
 
   const totalStock = computed(() => products.value.reduce((sum, p) => sum + p.stock, 0))
@@ -93,11 +92,9 @@ export function useProducts() {
   async function createProduct(data: ProductFormData): Promise<Product> {
     const now = new Date().toISOString()
     const payload = { ...data }
-    if (payload.category === 'celular' && !payload.condition) {
-      payload.condition = 'nuevo'
-    }
-    // No se borra la condición en otras categorías: un equipo recibido a cuenta
-    // (canje) puede ser un iPad/Mac/etc. y debe conservar su condición.
+    if (!payload.condition) payload.condition = 'nuevo'
+    if (payload.batteryHealth == null) delete payload.batteryHealth
+    delete (payload as ProductFormData & { sku?: string }).sku
     const product: Product = {
       ...payload,
       id: generateId(),
@@ -118,6 +115,11 @@ export function useProducts() {
       ...data,
       updatedAt: new Date().toISOString(),
     }
+    // La clave vacía tiene que salir del registro: el spread de undefined no la borra en IndexedDB.
+    if ('batteryHealth' in data && data.batteryHealth == null) {
+      delete updated.batteryHealth
+    }
+    delete (updated as Product & { sku?: string }).sku
     await saveProduct(updated)
     await loadProducts()
     return updated
@@ -137,17 +139,15 @@ export function useProducts() {
     return products.value.find((p) => p.id === id)
   }
 
-  function searchProducts(query: string): Product[] {
+  /**
+   * Búsqueda rápida para venta, permuta, compras y búsqueda global.
+   * `inStockOnly` filtra antes de recortar, así los productos sin stock no
+   * ocupan los primeros resultados.
+   */
+  function searchProducts(query: string, options: { inStockOnly?: boolean } = {}): Product[] {
     if (!query.trim()) return []
-    const q = query.toLowerCase()
     return products.value
-      .filter(
-        (p) =>
-          p.brand.toLowerCase().includes(q) ||
-          p.model.toLowerCase().includes(q) ||
-          p.variant?.toLowerCase().includes(q) ||
-          p.sku?.toLowerCase().includes(q),
-      )
+      .filter((p) => (!options.inStockOnly || p.stock > 0) && matchesProductSearch(p, query))
       .slice(0, 10)
   }
 

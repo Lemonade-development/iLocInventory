@@ -196,17 +196,26 @@ export async function clearBackupFolderHandle(): Promise<void> {
 
 // ─── Products ───────────────────────────────────────────────────────────────
 
+function withoutSku<T extends object>(record: T): T {
+  if (!('sku' in record)) return record
+  const copy = { ...record }
+  delete (copy as { sku?: unknown }).sku
+  return copy
+}
+
 export async function getAllProducts(): Promise<Product[]> {
-  return db.products.orderBy('updatedAt').reverse().toArray()
+  const products = await db.products.orderBy('updatedAt').reverse().toArray()
+  return products.map(withoutSku)
 }
 
 export async function getProductById(id: string): Promise<Product | undefined> {
-  return db.products.get(id)
+  const product = await db.products.get(id)
+  return product ? withoutSku(product) : undefined
 }
 
 export async function saveProduct(product: Product): Promise<void> {
   assertUnlocked()
-  await db.products.put(product)
+  await db.products.put(withoutSku(product))
 }
 
 export async function deleteProduct(id: string): Promise<void> {
@@ -260,6 +269,35 @@ export async function deleteContact(id: string): Promise<void> {
   await db.contacts.delete(id)
 }
 
+/**
+ * Guarda ventas históricas importadas y sus clientes nuevos en una sola
+ * transacción. No toca productos ni movimientos de inventario.
+ */
+export async function importHistoricalSales(data: { sales: Sale[]; contacts: Contact[] }): Promise<void> {
+  assertUnlocked()
+  await db.transaction('rw', db.sales, db.contacts, async () => {
+    if (data.contacts.length) await db.contacts.bulkAdd(data.contacts)
+    if (data.sales.length) await db.sales.bulkAdd(data.sales)
+  })
+}
+
+/**
+ * Aplica la importación de inventario en una sola transacción: productos
+ * nuevos, productos actualizados y las entradas de stock.
+ */
+export async function importInventory(data: {
+  newProducts: Product[]
+  updatedProducts: Product[]
+  movements: InventoryMovement[]
+}): Promise<void> {
+  assertUnlocked()
+  await db.transaction('rw', db.products, db.inventoryMovements, async () => {
+    if (data.newProducts.length) await db.products.bulkAdd(data.newProducts)
+    if (data.updatedProducts.length) await db.products.bulkPut(data.updatedProducts)
+    if (data.movements.length) await db.inventoryMovements.bulkAdd(data.movements)
+  })
+}
+
 // ─── Purchase Orders ─────────────────────────────────────────────────────────
 
 export async function getAllPurchaseOrders(): Promise<PurchaseOrder[]> {
@@ -293,7 +331,7 @@ export interface ReceivePurchaseOrderData {
   /** Modelos nuevos a crear en el catálogo */
   newProducts: Product[]
   /** Incrementos de stock/costo para productos existentes */
-  stockUpdates: { productId: string; stock: number; cost: number }[]
+  stockUpdates: { productId: string; stock: number; cost: number; price?: number }[]
   /** Movimientos de entrada generados por la recepción */
   movements: InventoryMovement[]
 }
@@ -306,7 +344,12 @@ export async function executeReceivePurchaseOrder(data: ReceivePurchaseOrderData
       await db.products.put(product)
     }
     for (const u of data.stockUpdates) {
-      await db.products.update(u.productId, { stock: u.stock, cost: u.cost, updatedAt: now })
+      await db.products.update(u.productId, {
+        stock: u.stock,
+        cost: u.cost,
+        ...(u.price ? { price: u.price } : {}),
+        updatedAt: now,
+      })
     }
     for (const movement of data.movements) {
       await db.inventoryMovements.put(movement)
@@ -482,11 +525,14 @@ export async function exportAllData(): Promise<ExportData> {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    products,
+    products: products.map(withoutSku),
     sales,
     inventoryMovements,
     contacts,
-    purchaseOrders,
+    purchaseOrders: purchaseOrders.map((order) => ({
+      ...order,
+      items: order.items.map(withoutSku),
+    })),
   }
 }
 
@@ -509,32 +555,11 @@ export async function importAllData(data: ExportData, replace = true): Promise<v
           db.purchaseOrders.clear(),
         ])
       }
-      await db.products.bulkPut(data.products)
+      await db.products.bulkPut(data.products.map(withoutSku))
       await db.sales.bulkPut(data.sales)
       await db.inventoryMovements.bulkPut(data.inventoryMovements)
       if (data.contacts?.length) await db.contacts.bulkPut(data.contacts)
       if (data.purchaseOrders?.length) await db.purchaseOrders.bulkPut(data.purchaseOrders)
     },
   )
-}
-
-export async function clearAllData(): Promise<void> {
-  assertUnlocked()
-  await db.transaction(
-    'rw',
-    [db.products, db.sales, db.inventoryMovements, db.contacts, db.purchaseOrders, db.files],
-    async () => {
-      await Promise.all([
-        db.products.clear(),
-        db.sales.clear(),
-        db.inventoryMovements.clear(),
-        db.contacts.clear(),
-        db.purchaseOrders.clear(),
-        db.files.clear(),
-      ])
-    },
-  )
-  await db.meta.delete(META_SEEDED_KEY)
-  await db.meta.delete(META_PO_COUNTER_KEY)
-  // Conserva la contraseña configurada aunque se restablezcan los datos de negocio.
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Plus, X, Search, Truck } from 'lucide-vue-next'
+import { Plus, X, Search, Truck, Download, Upload } from 'lucide-vue-next'
 import type {
   Contact,
   ContactFormData,
@@ -19,6 +19,7 @@ import { useAppStore } from '@/stores/app'
 import { ALL_CATEGORIES, CATEGORY_LABELS } from '@/utils/category'
 import { CONDITION_LABELS } from '@/utils/product'
 import { formatCurrency } from '@/utils/format'
+import { downloadPurchaseOrderTemplate, parsePurchaseOrderLines } from '@/services/purchaseOrderImport'
 
 const props = defineProps<{ order?: PurchaseOrder | null }>()
 const open = defineModel<boolean>({ required: true })
@@ -33,7 +34,6 @@ type Row = {
   brand: string
   model: string
   variant?: string
-  sku?: string
   category: ProductCategory
   condition: ProductCondition
   price?: number
@@ -63,7 +63,6 @@ function emptyRow(): Row {
     brand: '',
     model: '',
     variant: '',
-    sku: '',
     category: 'celular',
     condition: 'nuevo',
     price: undefined,
@@ -96,6 +95,7 @@ function reset() {
     rows.value = [emptyRow()]
   }
   activeSearch.value = null
+  importErrors.value = []
 }
 
 watch(open, (isOpen) => {
@@ -147,7 +147,6 @@ function selectProduct(row: Row, product: Product) {
   row.brand = product.brand
   row.model = product.model
   row.variant = product.variant
-  row.sku = product.sku
   row.category = product.category
   row.condition = product.condition ?? 'nuevo'
   row.price = product.price
@@ -159,6 +158,50 @@ function selectProduct(row: Row, product: Product) {
 function unlinkProduct(row: Row) {
   row.productId = undefined
   activeSearch.value = null
+}
+
+// ─── Líneas desde planilla (pedidos grandes) ────────────────────────────────
+
+const importingLines = ref(false)
+const importErrors = ref<string[]>([])
+
+async function onDownloadTemplate() {
+  try {
+    await downloadPurchaseOrderTemplate()
+  } catch {
+    appStore.showToast('No se pudo generar la plantilla', 'error')
+  }
+}
+
+async function onImportLines(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importingLines.value = true
+  importErrors.value = []
+  try {
+    await productsStore.loadProducts()
+    const result = await parsePurchaseOrderLines(file, productsStore.products)
+    importErrors.value = result.errors
+    if (result.lines.length === 0) {
+      appStore.showToast('La planilla no tiene líneas válidas', 'error')
+      return
+    }
+    // Las líneas vacías del formulario se reemplazan; las ya cargadas se conservan.
+    rows.value = [
+      ...rows.value.filter((r) => r.brand.trim() || r.model.trim()),
+      ...result.lines.map((line) => ({ ...line, receivedQuantity: 0, _search: '' })),
+    ]
+    appStore.showToast(
+      `${result.lines.length} línea(s) cargada(s) · ${result.linked} vinculada(s) a productos existentes`,
+      'success',
+    )
+  } catch (e) {
+    appStore.showToast(e instanceof Error ? e.message : 'No se pudo leer la planilla', 'error')
+  } finally {
+    importingLines.value = false
+  }
 }
 
 function addRow() {
@@ -191,7 +234,6 @@ function submit() {
       brand: r.brand.trim(),
       model: r.model.trim(),
       variant: r.variant?.trim() || undefined,
-      sku: r.sku?.trim() || undefined,
       category: r.category,
       condition: r.condition,
       price: r.price != null ? Number(r.price) : undefined,
@@ -451,13 +493,52 @@ function submit() {
           </div>
         </div>
 
-        <button
-          type="button"
-          class="mt-3 text-sm text-accent hover:underline"
-          @click="addRow"
+        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            class="text-sm text-accent hover:underline"
+            @click="addRow"
+          >
+            + Agregar modelo
+          </button>
+          <label
+            class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-zinc-300 transition hover:text-accent"
+            :class="{ 'pointer-events-none opacity-50': importingLines }"
+            title="Cargar las líneas desde una planilla (.xlsx, .ods, .csv)"
+          >
+            <Upload :size="14" />
+            {{ importingLines ? 'Leyendo planilla...' : 'Importar líneas' }}
+            <input
+              type="file"
+              accept=".xlsx,.xls,.ods,.csv"
+              class="hidden"
+              :disabled="importingLines"
+              @change="onImportLines"
+            />
+          </label>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 text-sm text-zinc-400 transition hover:text-accent"
+            @click="onDownloadTemplate"
+          >
+            <Download :size="14" />
+            Descargar plantilla
+          </button>
+        </div>
+        <div
+          v-if="importErrors.length > 0"
+          class="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning"
         >
-          + Agregar modelo
-        </button>
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <p class="font-medium">{{ importErrors.length }} fila(s) de la planilla no se cargaron:</p>
+            <button type="button" class="text-warning/80 hover:text-warning" @click="importErrors = []">
+              <X :size="14" />
+            </button>
+          </div>
+          <ul class="max-h-32 list-disc space-y-0.5 overflow-y-auto pl-4">
+            <li v-for="err in importErrors" :key="err">{{ err }}</li>
+          </ul>
+        </div>
       </div>
     </div>
 

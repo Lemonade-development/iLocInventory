@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { Minus, Plus } from 'lucide-vue-next'
-import type { Sale, SaleReturnItem, RefundMethod } from '@/types'
+import type { Sale, SaleReturn, SaleReturnItem, RefundMethod } from '@/types'
 import AppModal from '@/components/common/AppModal.vue'
+import ReturnCompletedModal from './ReturnCompletedModal.vue'
 import { useSalesStore } from '@/stores/sales'
 import { useAppStore } from '@/stores/app'
 import { formatCurrency } from '@/utils/format'
@@ -30,6 +31,11 @@ const emit = defineEmits<{
 
 const salesStore = useSalesStore()
 const appStore = useAppStore()
+
+// Devolución recién registrada: alimenta la pantalla con Imprimir nota.
+const completedSale = ref<Sale | null>(null)
+const completedReturn = ref<SaleReturn | null>(null)
+const showCompleted = ref(false)
 
 const REASONS = ['Defectuoso', 'Producto equivocado', 'No cumplió expectativas', 'Garantía', 'Otro']
 const refundMethods: { value: RefundMethod; label: string }[] = [
@@ -148,9 +154,11 @@ async function confirm() {
       reason: reason.value,
       notes: notes.value || undefined,
     })
-    appStore.showToast('Devolución registrada', 'success')
     emit('saved', updated)
     open.value = false
+    completedSale.value = updated
+    completedReturn.value = updated.returns?.at(-1) ?? null
+    showCompleted.value = true
   } catch (e) {
     appStore.showToast(e instanceof Error ? e.message : 'Error al registrar la devolución', 'error')
   } finally {
@@ -326,6 +334,11 @@ async function confirm() {
       </div>
     </template>
   </AppModal>
+  <ReturnCompletedModal
+    v-model="showCompleted"
+    :sale="completedSale"
+    :sale-return="completedReturn"
+  />
 </template>
 
 <style scoped>

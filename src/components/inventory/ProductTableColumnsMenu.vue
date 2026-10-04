@@ -16,7 +16,7 @@ const menuRef = ref<HTMLElement | null>(null)
 
 const columnOptions: { key: InventoryTableColumn; label: string }[] = [
   { key: 'product', label: 'Producto' },
-  { key: 'sku', label: 'SKU' },
+  { key: 'batteryHealth', label: 'Batería' },
   { key: 'category', label: 'Categoría' },
   { key: 'condition', label: 'Condición' },
   { key: 'price', label: 'Precio' },
@@ -79,9 +79,6 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
         <span class="flex-1">{{ col.label }}</span>
         <span v-if="col.key === 'product'" class="text-[10px] text-zinc-600">fija</span>
       </button>
-      <p class="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-zinc-600">
-        Arrastra los headers para reordenar. Producto siempre va primero.
-      </p>
     </div>
   </div>
 </template>

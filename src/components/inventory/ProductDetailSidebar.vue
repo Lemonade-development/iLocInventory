@@ -15,7 +15,15 @@ import { formatCurrency, formatDateTime } from '@/utils/format'
 import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 import { getFileUrl } from '@/services/storage'
 import { useInventoryStore } from '@/stores/inventory'
-import { CONDITION_LABELS } from '@/utils/product'
+import {
+  acceptsBatteryHealth,
+  batteryHealthTextClass,
+  CONDITION_LABELS,
+  isLowStock as productIsLowStock,
+  minStockOf,
+  parseBatteryHealth,
+} from '@/utils/product'
+import BatteryHealthBadge from './BatteryHealthBadge.vue'
 import { CATEGORY_LABELS } from '@/utils/category'
 import CategoryIcon from './CategoryIcon.vue'
 
@@ -42,7 +50,7 @@ const movementTypeLabels: Record<string, string> = {
 
 const isLowStock = computed(() => {
   if (!props.product) return false
-  return props.product.stock <= (props.product.minStock ?? 5)
+  return productIsLowStock(props.product)
 })
 
 const margin = computed(() => {
@@ -63,6 +71,12 @@ const productMovements = computed<InventoryMovement[]>(() => {
 const specEntries = computed(() => {
   if (!props.product?.specs) return []
   return Object.entries(props.product.specs)
+})
+
+const batteryPercent = computed(() => {
+  const product = props.product
+  if (!product || !acceptsBatteryHealth(product)) return undefined
+  return parseBatteryHealth(product.batteryHealth)
 })
 
 async function loadImage(path?: string) {
@@ -108,7 +122,7 @@ function detailRow(label: string, value: string | number | undefined | null) {
     <Transition name="drawer">
       <div v-if="open && product" class="fixed inset-0 z-50 flex justify-end">
         <div
-          class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          class="absolute inset-0 bg-black/60"
           @click="open = false"
         />
 
@@ -133,6 +147,10 @@ function detailRow(label: string, value: string | number | undefined | null) {
                 >
                   {{ CONDITION_LABELS[product.condition] }}
                 </span>
+                <BatteryHealthBadge
+                  v-if="acceptsBatteryHealth(product)"
+                  :health="product.batteryHealth"
+                />
               </div>
               <h2 class="mt-1 text-xl font-semibold text-zinc-100">
                 {{ product.brand }} {{ product.model }}
@@ -175,7 +193,7 @@ function detailRow(label: string, value: string | number | undefined | null) {
               class="mx-6 mt-5 flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
             >
               <AlertTriangle :size="16" />
-              Stock bajo — {{ product.stock }} unidades (mín. {{ product.minStock ?? 5 }})
+              Stock bajo — {{ product.stock }} unidades (mín. {{ minStockOf(product) }})
             </div>
 
             <!-- Precios e inventario -->
@@ -233,7 +251,10 @@ function detailRow(label: string, value: string | number | undefined | null) {
               <dl class="space-y-2.5">
                 <div
                   v-for="row in [
-                    detailRow('SKU', product.sku),
+                    detailRow(
+                      'Batería',
+                      batteryPercent !== undefined ? `${batteryPercent}%` : undefined,
+                    ),
                     ...(product.condition
                       ? [detailRow('Condición', CONDITION_LABELS[product.condition])]
                       : []),
@@ -244,7 +265,12 @@ function detailRow(label: string, value: string | number | undefined | null) {
                 >
                   <dt class="shrink-0 text-zinc-500">{{ row.label }}</dt>
                   <dd
-                    class="truncate text-right font-mono text-xs text-zinc-300"
+                    class="truncate text-right text-xs"
+                    :class="
+                      row.label === 'Batería' && batteryPercent !== undefined
+                        ? ['font-medium', batteryHealthTextClass(batteryPercent)]
+                        : 'font-mono text-zinc-300'
+                    "
                     :title="row.value"
                   >
                     {{ row.value }}
@@ -323,7 +349,7 @@ function detailRow(label: string, value: string | number | undefined | null) {
                 </div>
                 <div class="flex justify-between gap-4">
                   <dt class="text-zinc-500">Stock mínimo</dt>
-                  <dd class="text-zinc-300">{{ product.minStock ?? 5 }} uds.</dd>
+                  <dd class="text-zinc-300">{{ minStockOf(product) }} uds.</dd>
                 </div>
               </dl>
             </section>

@@ -4,12 +4,12 @@ import {
   Download,
   Upload,
   Database,
-  RefreshCw,
   Palette,
   Sun,
   Moon,
   Monitor,
   DollarSign,
+  Printer,
   Store,
   Save,
   Cloud,
@@ -17,18 +17,20 @@ import {
   LogOut,
   Shield,
   User,
+  Smartphone,
+  FileSpreadsheet,
 } from 'lucide-vue-next'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useStorage } from '@/composables/useStorage'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useCurrency } from '@/composables/useCurrency'
+import { usePrintSettings } from '@/composables/usePrintSettings'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 import {
   useCloudBackup,
   buildBackupData,
   type BackupFailure,
 } from '@/composables/useCloudBackup'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, todayIsoDate } from '@/utils/format'
 import { useProductsStore } from '@/stores/products'
 import { useSalesStore } from '@/stores/sales'
 import { useAppStore } from '@/stores/app'
@@ -38,10 +40,14 @@ import PasswordInputForm from '@/components/auth/PasswordInputForm.vue'
 import { PASSWORD_REQUIREMENTS_HINT, USERNAME_REQUIREMENTS_HINT } from '@/services/auth'
 import UsernameInputForm from '@/components/auth/UsernameInputForm.vue'
 import type { ExportData } from '@/services/storage'
+import { addMissingIphoneCatalog } from '@/services/seed'
+import SalesImportModal from '@/components/sales/SalesImportModal.vue'
+import InventoryImportModal from '@/components/inventory/InventoryImportModal.vue'
 
-const { backend, importData, resetData } = useStorage()
+const { backend, importData } = useStorage()
 const { preference, setTheme } = useTheme()
 const { exchangeRate, showUsd, setExchangeRate, setShowUsd } = useCurrency()
+const { autoPrint, setAutoPrint } = usePrintSettings()
 const {
   name: storeName,
   description: storeDescription,
@@ -221,6 +227,8 @@ const {
 } = useCloudBackup()
 
 const backingUp = ref(false)
+/** Se muestra la guía de iCloud cuando el selector se cerró sin carpeta. */
+const showFolderHelp = ref(false)
 
 onMounted(() => {
   void initCloudBackup()
@@ -228,10 +236,9 @@ onMounted(() => {
 
 /** Traduce el motivo del fallo a un mensaje que diga qué hacer. */
 function reportBackupFailure(reason: BackupFailure | undefined): void {
-  if (reason === 'cancelled') return // cerró el selector: no hay nada que avisar
+  if (reason === 'cancelled') return // cerró el selector: la guía queda visible en la tarjeta
   const messages: Record<string, string> = {
-    blocked:
-      'Chrome no permite esa carpeta. Elige una subcarpeta dentro de ella (p. ej. iCloud Drive › iLoc), no la raíz.',
+    blocked: 'Chrome no permite esa carpeta. Sigue los pasos de la tarjeta para usar Documentos › iLoc.',
     permission: 'No se concedió permiso de escritura sobre la carpeta',
     'no-folder': 'Primero elige una carpeta de respaldo',
     unsupported: 'Este navegador no soporta el respaldo a una carpeta. Usa Google Chrome.',
@@ -242,9 +249,13 @@ function reportBackupFailure(reason: BackupFailure | undefined): void {
 async function handleChooseFolder() {
   const result = await chooseFolder()
   if (!result.ok) {
+    // Chrome a veces avisa "contiene archivos del sistema" y luego lo informa como
+    // una cancelación: en ambos casos se ofrece la guía.
+    if (result.reason === 'cancelled' || result.reason === 'blocked') showFolderHelp.value = true
     reportBackupFailure(result.reason)
     return
   }
+  showFolderHelp.value = false
   if (result.persisted) {
     appStore.showToast(`Carpeta de respaldo: ${cloudFolder.value}`, 'success')
   } else {
@@ -289,8 +300,28 @@ const themeOptions: { value: ThemePreference; label: string; icon: typeof Sun }[
   { value: 'system', label: 'Sistema', icon: Monitor },
 ]
 
-const showResetConfirm = ref(false)
 const importing = ref(false)
+const loadingCatalog = ref(false)
+const showSalesImport = ref(false)
+const showInventoryImport = ref(false)
+
+async function handleLoadCatalog() {
+  loadingCatalog.value = true
+  try {
+    const added = await addMissingIphoneCatalog()
+    await productsStore.loadProducts()
+    appStore.showToast(
+      added > 0
+        ? `${added} variante(s) de iPhone agregada(s) al inventario`
+        : 'El catálogo de iPhone ya estaba completo',
+      'success',
+    )
+  } catch {
+    appStore.showToast('Error al cargar el catálogo de iPhone', 'error')
+  } finally {
+    loadingCatalog.value = false
+  }
+}
 
 async function handleExportJson() {
   try {
@@ -299,7 +330,7 @@ async function handleExportJson() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `iloc-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `iloc-backup-${todayIsoDate()}.json`
     a.click()
     URL.revokeObjectURL(url)
     appStore.showToast('Respaldo JSON descargado', 'success')
@@ -311,7 +342,7 @@ async function handleExportJson() {
 async function handleExportCsv() {
   try {
     await productsStore.loadProducts()
-    const headers = ['sku', 'brand', 'model', 'variant', 'category', 'condition', 'price', 'cost', 'stock', 'minStock']
+    const headers = ['brand', 'model', 'variant', 'category', 'condition', 'batteryHealth', 'price', 'cost', 'stock', 'minStock']
     const rows = productsStore.products.map((p) =>
       headers.map((h) => {
         const val = p[h as keyof typeof p]
@@ -323,7 +354,7 @@ async function handleExportCsv() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `iloc-productos-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `iloc-productos-${todayIsoDate()}.csv`
     a.click()
     URL.revokeObjectURL(url)
     appStore.showToast('CSV de productos descargado', 'success')
@@ -363,19 +394,6 @@ async function handleImportJson(event: Event) {
   } finally {
     importing.value = false
     input.value = ''
-  }
-}
-
-async function handleReset() {
-  try {
-    await resetData()
-    await Promise.all([
-      productsStore.loadProducts(),
-      salesStore.loadSales(),
-    ])
-    appStore.showToast('Datos restablecidos con datos de prueba', 'success')
-  } catch {
-    appStore.showToast('Error al restablecer', 'error')
   }
 }
 </script>
@@ -586,6 +604,36 @@ async function handleReset() {
 
     <section class="rounded-xl border border-border bg-surface-raised p-6">
       <div class="mb-4 flex items-center gap-3">
+        <Printer :size="20" class="text-accent" />
+        <h2 class="text-sm font-medium text-zinc-300">Impresión</h2>
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm text-zinc-300">Imprimir automáticamente al registrar</p>
+          <p class="text-xs text-zinc-500">
+            Al registrar una venta, una devolución o un abono se abre el diálogo de impresión
+            sin tocar Imprimir. Las órdenes de compra (hoja carta) se imprimen a mano. Se
+            guarda solo en este equipo.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="autoPrint"
+          class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition"
+          :class="autoPrint ? 'bg-accent' : 'bg-surface-overlay border border-border'"
+          @click="setAutoPrint(!autoPrint)"
+        >
+          <span
+            class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+            :class="autoPrint ? 'translate-x-6' : 'translate-x-1'"
+          />
+        </button>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-border bg-surface-raised p-6">
+      <div class="mb-4 flex items-center gap-3">
         <Database :size="20" class="text-accent" />
         <h2 class="text-sm font-medium text-zinc-300">Almacenamiento local</h2>
       </div>
@@ -616,13 +664,56 @@ async function handleReset() {
       <template v-if="cloudSupported">
         <p class="mb-2 text-sm text-zinc-500">
           Elige una carpeta que iCloud Drive (o Google Drive) sincronice. La app guardará ahí un
-          respaldo y la nube lo subirá sola. No incluye las fotos de productos.
+          respaldo por día y la nube lo subirá sola. No incluye las fotos de productos.
         </p>
         <p class="mb-4 text-xs text-zinc-500">
           Tiene que ser una <span class="text-zinc-300">subcarpeta</span>: el navegador no deja
-          elegir Escritorio, Documentos, Descargas ni la raíz de iCloud Drive. Crea una dentro
-          (por ejemplo <span class="text-zinc-300">iCloud Drive › iLoc</span>) y elígela.
+          elegir Escritorio, Documentos ni Descargas directamente. Recomendado:
+          <span class="text-zinc-300">Documentos › iLoc</span>, con iCloud sincronizando Documentos.
+          <button
+            v-if="!showFolderHelp"
+            type="button"
+            class="text-accent transition hover:text-accent-hover"
+            @click="showFolderHelp = true"
+          >
+            Ver cómo
+          </button>
         </p>
+
+        <div
+          v-if="showFolderHelp"
+          class="mb-4 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-zinc-400"
+        >
+          <p class="mb-2 font-medium text-zinc-200">¿Chrome no te deja elegir la carpeta de iCloud?</p>
+          <p class="mb-2">
+            Algunas versiones de Chrome (como la de macOS Mojave) bloquean las carpetas de iCloud
+            Drive y muestran "contiene archivos del sistema". No hay un permiso que lo destrabe,
+            pero iCloud puede sincronizar la carpeta Documentos, que Chrome sí acepta:
+          </p>
+          <ol class="list-decimal space-y-1 pl-5">
+            <li>
+              Abre <span class="text-zinc-200">Preferencias del Sistema › iCloud</span> (o
+              <span class="text-zinc-200">ID de Apple › iCloud</span>) y pulsa
+              <span class="text-zinc-200">Opciones…</span> junto a iCloud Drive.
+            </li>
+            <li>
+              Activa <span class="text-zinc-200">Carpetas Escritorio y Documentos</span> y pulsa
+              Aceptar.
+            </li>
+            <li>En Finder, dentro de <span class="text-zinc-200">Documentos</span>, crea una carpeta llamada <span class="text-zinc-200">iLoc</span>.</li>
+            <li>
+              Aquí pulsa <span class="text-zinc-200">Elegir carpeta</span>, entra en Documentos,
+              selecciona <span class="text-zinc-200">iLoc</span> y acepta el permiso de edición.
+            </li>
+          </ol>
+          <button
+            type="button"
+            class="mt-2 text-zinc-500 transition hover:text-zinc-300"
+            @click="showFolderHelp = false"
+          >
+            Ocultar
+          </button>
+        </div>
 
         <div class="space-y-4">
           <div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-overlay px-4 py-3">
@@ -697,6 +788,58 @@ async function handleReset() {
     </section>
 
     <section class="rounded-xl border border-border bg-surface-raised p-6">
+      <h2 class="mb-4 text-sm font-medium text-zinc-300">Catálogo</h2>
+      <button
+        type="button"
+        class="flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay disabled:pointer-events-none disabled:opacity-50"
+        :disabled="loadingCatalog"
+        @click="handleLoadCatalog"
+      >
+        <Smartphone :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">
+            {{ loadingCatalog ? 'Cargando catálogo...' : 'Cargar catálogo de iPhone' }}
+          </p>
+          <p class="text-xs text-zinc-500">
+            Del iPhone X en adelante, cada color y capacidad, en Nuevo y Segunda mano. Agrega
+            solo las variantes que falten, sin precio ni stock; no modifica productos existentes.
+          </p>
+        </div>
+      </button>
+      <button
+        type="button"
+        class="mt-3 flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay"
+        @click="showSalesImport = true"
+      >
+        <FileSpreadsheet :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">Importar ventas desde planilla</p>
+          <p class="text-xs text-zinc-500">
+            Registro de ventas en .ods, .xlsx o .csv. Crea las ventas históricas y sus clientes,
+            sin tocar el stock. Muestra una vista previa antes de guardar.
+          </p>
+        </div>
+      </button>
+      <button
+        type="button"
+        class="mt-3 flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay"
+        @click="showInventoryImport = true"
+      >
+        <FileSpreadsheet :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">Carga inicial de inventario</p>
+          <p class="text-xs text-zinc-500">
+            Descargá la plantilla, completala y subila para cargar lo que ya tenés en el local.
+            Crea productos nuevos y actualiza precio, costo y stock de los existentes. La
+            reposición con proveedor va por Órdenes de compra.
+          </p>
+        </div>
+      </button>
+      <SalesImportModal v-model="showSalesImport" />
+      <InventoryImportModal v-model="showInventoryImport" />
+    </section>
+
+    <section class="rounded-xl border border-border bg-surface-raised p-6">
       <h2 class="mb-4 text-sm font-medium text-zinc-300">Respaldo y restauración</h2>
       <div class="space-y-3">
         <button
@@ -740,30 +883,6 @@ async function handleReset() {
         </label>
       </div>
     </section>
-
-    <section class="rounded-xl border border-danger/30 bg-danger/5 p-6">
-      <h2 class="mb-2 text-sm font-medium text-danger">Zona de peligro</h2>
-      <p class="mb-4 text-sm text-zinc-400">
-        Restablece la base de datos con los datos de prueba iniciales. Se perderán todos los datos actuales.
-      </p>
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-danger/50 px-4 py-2 text-sm text-danger transition hover:bg-danger/10"
-        @click="showResetConfirm = true"
-      >
-        <RefreshCw :size="16" />
-        Restablecer datos de prueba
-      </button>
-    </section>
-
-    <ConfirmDialog
-      v-model="showResetConfirm"
-      title="Restablecer datos"
-      message="¿Estás seguro? Se eliminarán todos los datos y se cargarán los datos de prueba iniciales."
-      confirm-label="Restablecer"
-      variant="danger"
-      @confirm="handleReset"
-    />
 
     <AppModal v-model="showChangeUsernameModal" title="Cambiar usuario" size="sm">
       <p class="mb-4 text-sm text-zinc-500">{{ USERNAME_REQUIREMENTS_HINT }}</p>

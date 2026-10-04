@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Plus, Filter } from 'lucide-vue-next'
+import { Plus, Filter, Upload } from 'lucide-vue-next'
+import InventoryImportModal from '@/components/inventory/InventoryImportModal.vue'
 import InventoryBulkBar from '@/components/inventory/InventoryBulkBar.vue'
 import BulkStockAdjustmentModal from '@/components/inventory/BulkStockAdjustmentModal.vue'
 import type { Product, ProductFilters, ProductFormData, TableSortState } from '@/types'
@@ -12,6 +13,9 @@ import ProductFormModal from '@/components/inventory/ProductFormModal.vue'
 import StockAdjustmentModal from '@/components/inventory/StockAdjustmentModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import TableToolbar from '@/components/common/TableToolbar.vue'
+import TablePagination from '@/components/common/TablePagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { useProductsStore } from '@/stores/products'
 import { useInventoryStore } from '@/stores/inventory'
 import { useAppStore } from '@/stores/app'
@@ -25,9 +29,6 @@ const appStore = useAppStore()
 
 const {
   visibleColumns,
-  columnWidths,
-  setColumnWidth,
-  reorderColumns,
   toggleColumnVisibility,
 } = useInventoryTableLayout()
 
@@ -40,6 +41,26 @@ const filters = ref<ProductFilters>({
   sortBy: null,
   sortDir: null,
 })
+
+const hasActiveFilters = computed(
+  () =>
+    !!filters.value.search.trim() ||
+    !!filters.value.brand ||
+    !!filters.value.category ||
+    !!filters.value.condition ||
+    filters.value.lowStockOnly,
+)
+
+/** Vuelve a los filtros de inicio; el orden elegido se mantiene. */
+function clearFilters() {
+  Object.assign(filters.value, {
+    search: '',
+    brand: '',
+    category: '',
+    condition: '',
+    lowStockOnly: false,
+  })
+}
 
 const tableSort = computed<TableSortState>({
   get: () => ({ sortBy: filters.value.sortBy, sortDir: filters.value.sortDir }),
@@ -71,6 +92,14 @@ const selectedProduct = computed((): Product | null => {
 })
 
 const filteredProducts = computed(() => productsStore.filterProducts(filters.value))
+
+// `filters` incluye el orden: cualquier cambio vuelve a la página 1.
+const {
+  page,
+  pageSize,
+  pageCount,
+  pagedRows: pagedProducts,
+} = usePagination(filteredProducts, { resetOn: [filters] })
 
 const bulkSelectedProducts = computed(() =>
   productsStore.products.filter((p) => selectedProductIds.value.includes(p.id)),
@@ -221,45 +250,33 @@ async function handleBulkDelete() {
   }
 }
 
+const importOpen = ref(false)
+
 const highlightId = computed(() => route.query.highlight as string | undefined)
 </script>
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <input
-          v-model="filters.search"
-          type="search"
-          placeholder="Buscar productos..."
-          class="w-64 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-        />
-        <select
-          v-model="filters.brand"
-          class="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm focus:border-accent focus:outline-none"
-        >
+    <TableToolbar
+      v-model:search="filters.search"
+      search-placeholder="Buscar productos..."
+      :filtered="hasActiveFilters"
+      @clear="clearFilters"
+    >
+      <template #filters>
+        <select v-model="filters.brand" class="toolbar-control">
           <option value="">Todas las marcas</option>
           <option v-for="brand in productsStore.brands" :key="brand" :value="brand">
             {{ brand }}
           </option>
         </select>
-        <select
-          v-model="filters.category"
-          class="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm focus:border-accent focus:outline-none"
-        >
+        <select v-model="filters.category" class="toolbar-control">
           <option value="">Todas las categorías</option>
-          <option
-            v-for="cat in ALL_CATEGORIES"
-            :key="cat"
-            :value="cat"
-          >
+          <option v-for="cat in ALL_CATEGORIES" :key="cat" :value="cat">
             {{ CATEGORY_LABELS[cat] }}
           </option>
         </select>
-        <select
-          v-model="filters.condition"
-          class="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm focus:border-accent focus:outline-none"
-        >
+        <select v-model="filters.condition" class="toolbar-control">
           <option value="">Todas las condiciones</option>
           <option value="nuevo">Nuevo</option>
           <option value="segunda_mano">Segunda mano</option>
@@ -269,33 +286,50 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
           <Filter :size="14" />
           Stock bajo
         </label>
+      </template>
+      <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
+          title="Carga inicial de inventario desde planilla"
+          @click="importOpen = true"
+        >
+          <Upload :size="16" />
+          Carga inicial
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          @click="openCreate"
+        >
+          <Plus :size="16" />
+          Nuevo producto
+        </button>
+      </template>
+      <template #summary>
+        <span>
+          {{ filteredProducts.length }}
+          <template v-if="hasActiveFilters">de {{ productsStore.products.length }}</template>
+          producto(s)
+        </span>
+      </template>
+      <template #tools>
         <ProductTableColumnsMenu
           :visible-columns="visibleColumns"
           @toggle-column="toggleColumnVisibility"
         />
-      </div>
-
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-        @click="openCreate"
-      >
-        <Plus :size="16" />
-        Nuevo producto
-      </button>
-    </div>
+      </template>
+    </TableToolbar>
 
     <InventoryBulkBar
       v-if="selectedProductIds.length > 0"
       :count="selectedProductIds.length"
+      :total-count="filteredProducts.length"
+      @select-all="selectedProductIds = filteredProducts.map((p) => p.id)"
       @adjust-stock="openBulkAdjust"
       @delete="openBulkDelete"
       @clear="selectedProductIds = []"
     />
-
-    <p class="text-sm text-zinc-500">
-      {{ filteredProducts.length }} producto(s)
-    </p>
 
     <LoadingSpinner v-if="productsStore.loading" label="Cargando inventario..." />
 
@@ -303,17 +337,23 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
       v-else
       v-model:sort="tableSort"
       v-model:selected-ids="selectedProductIds"
-      :products="filteredProducts"
+      :products="pagedProducts"
       :visible-columns="visibleColumns"
-      :column-widths="columnWidths"
       :highlight-id="highlightId"
       :selected-id="selectedProductId ?? undefined"
+      :filtered="hasActiveFilters && productsStore.products.length > 0"
+      @clear-filters="clearFilters"
       @select="openDetail"
       @edit="openEdit"
       @delete="openDelete"
       @adjust-stock="openAdjust"
-      @reorder-columns="reorderColumns"
-      @resize-column="setColumnWidth"
+    />
+    <TablePagination
+      v-if="!productsStore.loading"
+      v-model:page="page"
+      :total="filteredProducts.length"
+      :page-size="pageSize"
+      :page-count="pageCount"
     />
 
     <ProductDetailSidebar
@@ -359,5 +399,7 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
       variant="danger"
       @confirm="handleBulkDelete"
     />
+
+    <InventoryImportModal v-model="importOpen" />
   </div>
 </template>

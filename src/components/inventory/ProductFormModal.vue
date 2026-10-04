@@ -4,7 +4,7 @@ import { Minus, Plus } from 'lucide-vue-next'
 import type { Product, ProductCondition, ProductFormData } from '@/types'
 import AppModal from '@/components/common/AppModal.vue'
 import ProductImageUpload from './ProductImageUpload.vue'
-import { CONDITION_LABELS } from '@/utils/product'
+import { acceptsBatteryHealth, CONDITION_LABELS, parseBatteryHealth } from '@/utils/product'
 import { ALL_CATEGORIES, CATEGORY_LABELS } from '@/utils/category'
 
 const props = withDefaults(
@@ -17,15 +17,11 @@ const props = withDefaults(
     stockDefault?: number
     /** Condición por defecto para un producto nuevo (segunda mano en un canje). */
     conditionDefault?: ProductCondition
-    /** Permite elegir/guardar la condición en cualquier categoría (no solo
-     *  celulares). Se usa en el canje, donde se reciben iPads, Macs, etc. */
-    conditionAllCategories?: boolean
   }>(),
   {
     priceRequired: true,
     stockDefault: 0,
     conditionDefault: 'nuevo',
-    conditionAllCategories: false,
   },
 )
 
@@ -53,15 +49,14 @@ const defaultForm = (): ProductForm => ({
   cost: undefined,
   stock: props.stockDefault || undefined,
   minStock: 5,
-  sku: '',
   imagePath: undefined,
 })
 
 const form = ref<ProductForm>(defaultForm())
 const priceError = ref(false)
+const batteryError = ref(false)
 
-const isCelular = computed(() => form.value.category === 'celular')
-const showCondition = computed(() => isCelular.value || props.conditionAllCategories)
+const showBattery = computed(() => acceptsBatteryHealth({ condition: form.value.condition }))
 
 const conditions: { value: ProductCondition; label: string }[] = [
   { value: 'nuevo', label: CONDITION_LABELS.nuevo },
@@ -73,32 +68,32 @@ watch(
   ([isOpen, product]) => {
     if (!isOpen) return
     priceError.value = false
+    batteryError.value = false
     if (product) {
       const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = product
       // Un valor de 0 se muestra vacío para no arrastrar el 0 al escribir.
       form.value = { ...rest, price: rest.price || undefined, cost: rest.cost || undefined }
-      if (rest.category === 'celular' && !rest.condition) {
-        form.value.condition = props.conditionDefault
-      }
+      if (!rest.condition) form.value.condition = props.conditionDefault
     } else {
       form.value = defaultForm()
     }
   },
 )
 
-watch(
-  () => form.value.category,
-  (category) => {
-    const conditionApplies = category === 'celular' || props.conditionAllCategories
-    if (!conditionApplies) {
-      // Solo se limpia en productos nuevos; al editar se conserva la condición
-      // que ya tenga el producto (p. ej. un canje de iPad/Mac).
-      if (!props.product) delete form.value.condition
-    } else if (!form.value.condition) {
-      form.value.condition = props.conditionDefault
-    }
-  },
-)
+watch(showBattery, (visible) => {
+  if (!visible) batteryError.value = false
+})
+
+function onBatteryInput(event: Event) {
+  batteryError.value = false
+  const raw = (event.target as HTMLInputElement).value
+  if (raw.trim() === '') {
+    form.value.batteryHealth = undefined
+    return
+  }
+  const n = Number(raw)
+  form.value.batteryHealth = Number.isFinite(n) ? n : undefined
+}
 
 const categories = ALL_CATEGORIES.map((value) => ({
   value,
@@ -110,19 +105,35 @@ function stepField(field: 'stock' | 'minStock', delta: number) {
   form.value[field] = Math.max(0, next)
 }
 
+function emptyNumber(value: unknown): boolean {
+  return value === undefined || value === null || value === '' || Number.isNaN(value)
+}
+
 function submit() {
   const data: ProductFormData = {
     ...form.value,
     price: Number(form.value.price) || 0,
     cost: Number(form.value.cost) || 0,
     stock: Number(form.value.stock) || 0,
-    minStock: Number(form.value.minStock) || undefined,
+    // Vacío usa el mínimo por defecto; 0 desactiva el aviso de stock bajo.
+    minStock: emptyNumber(form.value.minStock) ? undefined : Math.max(0, Number(form.value.minStock) || 0),
   }
-  const conditionApplies = data.category === 'celular' || props.conditionAllCategories
-  if (!conditionApplies) {
-    if (!props.product) delete data.condition
-  } else if (!data.condition) {
-    data.condition = props.conditionDefault
+  if (!data.condition) data.condition = props.conditionDefault
+  if (showBattery.value) {
+    const raw = form.value.batteryHealth
+    const empty = raw === undefined || raw === null || Number.isNaN(raw)
+    if (empty) {
+      data.batteryHealth = undefined
+    } else {
+      const parsed = parseBatteryHealth(raw)
+      if (parsed === undefined) {
+        batteryError.value = true
+        return
+      }
+      data.batteryHealth = parsed
+    }
+  } else {
+    data.batteryHealth = undefined
   }
   if (props.priceRequired && data.price <= 0) {
     priceError.value = true
@@ -159,9 +170,24 @@ function submit() {
               class="input-field"
             />
           </div>
-          <div>
-            <label class="mb-1 block text-sm text-zinc-400">SKU</label>
-            <input v-model="form.sku" class="input-field" />
+          <div v-if="showBattery">
+            <label class="mb-1 block text-sm text-zinc-400" for="battery-health">Batería</label>
+            <div class="relative">
+              <input
+                id="battery-health"
+                :value="form.batteryHealth ?? ''"
+                type="number"
+                min="1"
+                max="100"
+                inputmode="numeric"
+                placeholder="87"
+                class="no-spinner input-field pr-7"
+                :class="{ 'ring-1 ring-danger': batteryError }"
+                @input="onBatteryInput"
+              />
+              <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-zinc-500">%</span>
+            </div>
+            <p v-if="batteryError" class="mt-1 text-xs text-danger">Ingresa un porcentaje entre 1 y 100.</p>
           </div>
           <div>
             <label class="mb-1 block text-sm text-zinc-400">Categoría *</label>
@@ -253,7 +279,7 @@ function submit() {
         </div>
       </div>
 
-      <div v-if="showCondition" class="flex items-center justify-end gap-3">
+      <div class="flex items-center justify-end gap-3">
         <label class="shrink-0 text-sm text-zinc-400">Condición *</label>
         <div class="flex gap-1.5">
           <button

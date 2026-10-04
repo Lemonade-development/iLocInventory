@@ -1,19 +1,27 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { Search, Plus, X, User } from 'lucide-vue-next'
-import type { Sale, SaleItem, DiscountType, ContactFormData } from '@/types'
+import type { DeviceImeis, Sale, SaleItem, DiscountType, ContactFormData } from '@/types'
 import AppModal from '@/components/common/AppModal.vue'
 import ContactFormModal from '@/components/contacts/ContactFormModal.vue'
 import { useSalesStore } from '@/stores/sales'
 import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
 import { formatCurrency } from '@/utils/format'
+import AppleAccountFields from './AppleAccountFields.vue'
+import {
+  appleAccountDraftFrom,
+  appleAccountError,
+  toStoredAppleAccount,
+  type AppleAccountDraft,
+} from '@/utils/appleAccount'
 
 interface EditItem {
   productId: string
   productName: string
   quantity: number
   unitPrice: number
+  imeis?: DeviceImeis[]
 }
 
 const props = defineProps<{
@@ -40,6 +48,7 @@ const contactSearchQuery = ref('')
 const showContactForm = ref(false)
 const creditDownPayment = ref<number>(0)
 const creditDueDate = ref<string>('')
+const appleAccount = ref<AppleAccountDraft>(appleAccountDraftFrom())
 const saving = ref(false)
 
 const isCredit = computed(() => props.sale?.paymentMethod === 'credito')
@@ -53,6 +62,7 @@ watch(
       productName: i.productName,
       quantity: i.quantity,
       unitPrice: i.unitPrice,
+      imeis: i.imeis,
     }))
     discountType.value = sale.discountType ?? 'fixed'
     discountValue.value = sale.discountValue ?? 0
@@ -62,6 +72,7 @@ watch(
     contactSearchQuery.value = ''
     creditDownPayment.value = sale.creditDownPayment ?? 0
     creditDueDate.value = sale.creditDueDate ?? ''
+    appleAccount.value = appleAccountDraftFrom(sale.appleAccount)
   },
   { immediate: true },
 )
@@ -145,6 +156,11 @@ async function save() {
     appStore.showToast('Indica la fecha del pago final', 'error')
     return
   }
+  const accountError = appleAccountError(appleAccount.value)
+  if (accountError) {
+    appStore.showToast(accountError, 'error')
+    return
+  }
   saving.value = true
   try {
     const newItems: SaleItem[] = items.value.map((i) => ({
@@ -153,6 +169,7 @@ async function save() {
       quantity: i.quantity,
       unitPrice: i.unitPrice || 0,
       subtotal: (i.unitPrice || 0) * i.quantity,
+      imeis: i.imeis,
     }))
     const patch: Partial<Sale> = {
       contactId: contactId.value,
@@ -164,6 +181,7 @@ async function save() {
       discountValue: discountAmount.value > 0 ? discountValue.value : undefined,
       discountAmount: discountAmount.value > 0 ? discountAmount.value : undefined,
       total: total.value,
+      appleAccount: toStoredAppleAccount(appleAccount.value),
     }
     if (isCredit.value) {
       patch.creditDownPayment = creditDownPayment.value || 0
@@ -333,6 +351,8 @@ async function save() {
           <input v-model="creditDueDate" type="date" class="input-field" />
         </div>
       </div>
+
+      <AppleAccountFields :account="appleAccount" />
 
       <!-- Resumen -->
       <div class="space-y-2 border-t border-border pt-4 text-sm">

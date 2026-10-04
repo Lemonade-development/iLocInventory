@@ -8,8 +8,24 @@ import { useProductsStore } from '@/stores/products'
 import { useSalesStore } from '@/stores/sales'
 import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
-import { formatCurrency, formatDate } from '@/utils/format'
+import { formatCurrency, formatDate, todayIsoDate } from '@/utils/format'
 import ProductFormModal from '@/components/inventory/ProductFormModal.vue'
+import BatteryHealthBadge from '@/components/inventory/BatteryHealthBadge.vue'
+import { acceptsBatteryHealth } from '@/utils/product'
+import ImeiUnitFields from '@/components/sales/ImeiUnitFields.vue'
+import AppleAccountFields from '@/components/sales/AppleAccountFields.vue'
+import {
+  appleAccountError,
+  emptyAppleAccountDraft,
+  type AppleAccountDraft,
+} from '@/utils/appleAccount'
+import {
+  emptyImeiDraft,
+  isIphoneDevice,
+  isPhoneCategory,
+  phoneImeiError,
+  resizeImeiDrafts,
+} from '@/utils/imei'
 import ContactFormModal from '@/components/contacts/ContactFormModal.vue'
 import SaleCompletedModal from '@/components/sales/SaleCompletedModal.vue'
 
@@ -60,6 +76,7 @@ const customerName = ref('')
 const customerPhone = ref('')
 const paymentMethod = ref<PaymentMethod>('efectivo')
 const notes = ref('')
+const appleAccount = ref<AppleAccountDraft>(emptyAppleAccountDraft())
 const processing = ref(false)
 
 // Venta recién registrada: alimenta el modal informativo con opción de PDF.
@@ -124,11 +141,11 @@ const showProductForm = ref(false)
 // Venta a crédito (pagar después): abono inicial + saldo + fecha de pago final.
 const creditDownPayment = ref<number>(0)
 const creditDueDate = ref<string>('')
-const today = new Date().toISOString().slice(0, 10)
+const today = todayIsoDate()
 
 const searchResults = computed(() => {
   if (!searchQuery.value.trim()) return []
-  return productsStore.searchProducts(searchQuery.value).filter((p) => p.stock > 0)
+  return productsStore.searchProducts(searchQuery.value, { inStockOnly: true })
 })
 
 const subtotal = computed(() => salesStore.cartSubtotal(cart.value))
@@ -191,8 +208,16 @@ function addTradeInProduct(product: Product, unitValue = 0) {
   const existing = tradeInEntries.value.find((t) => t.product.id === product.id)
   if (existing) {
     existing.quantity++
+    if (isPhoneCategory(product.category)) {
+      existing.imeis = resizeImeiDrafts(existing.imeis, existing.quantity, isIphoneDevice(product))
+    }
   } else {
-    tradeInEntries.value.push({ product, quantity: 1, unitValue })
+    tradeInEntries.value.push({
+      product,
+      quantity: 1,
+      unitValue,
+      imeis: isPhoneCategory(product.category) ? [emptyImeiDraft(isIphoneDevice(product))] : [],
+    })
   }
   tradeInSearchQuery.value = ''
 }
@@ -205,6 +230,9 @@ function updateTradeInQuantity(productId: string, delta: number) {
     tradeInEntries.value = tradeInEntries.value.filter((t) => t.product.id !== productId)
   } else {
     item.quantity = next
+    if (isPhoneCategory(item.product.category)) {
+      item.imeis = resizeImeiDrafts(item.imeis, next, isIphoneDevice(item.product))
+    }
   }
 }
 
@@ -225,7 +253,12 @@ async function handleCreateTradeInProduct(data: ProductFormData) {
     const product = await productsStore.createProduct({ ...data, stock: 0 })
     addTradeInProduct(product, data.cost || 0)
     const entry = tradeInEntries.value.find((t) => t.product.id === product.id)
-    if (entry) entry.quantity = receivedQty
+    if (entry) {
+      entry.quantity = receivedQty
+      if (isPhoneCategory(product.category)) {
+        entry.imeis = resizeImeiDrafts(entry.imeis, receivedQty, isIphoneDevice(product))
+      }
+    }
     showProductForm.value = false
     appStore.showToast('Producto creado y agregado al canje', 'success')
   } catch {
@@ -236,9 +269,18 @@ async function handleCreateTradeInProduct(data: ProductFormData) {
 function addToCart(product: Product) {
   const existing = cart.value.find((item) => item.product.id === product.id)
   if (existing) {
-    if (existing.quantity < product.stock) existing.quantity++
+    if (existing.quantity < product.stock) {
+      existing.quantity++
+      if (isPhoneCategory(product.category)) {
+        existing.imeis = resizeImeiDrafts(existing.imeis, existing.quantity, isIphoneDevice(product))
+      }
+    }
   } else {
-    cart.value.push({ product, quantity: 1 })
+    cart.value.push({
+      product,
+      quantity: 1,
+      imeis: isPhoneCategory(product.category) ? [emptyImeiDraft(isIphoneDevice(product))] : [],
+    })
   }
   searchQuery.value = ''
 }
@@ -251,7 +293,43 @@ function updateQuantity(productId: string, delta: number) {
     cart.value = cart.value.filter((i) => i.product.id !== productId)
   } else if (newQty <= item.product.stock) {
     item.quantity = newQty
+    if (isPhoneCategory(item.product.category)) {
+      item.imeis = resizeImeiDrafts(item.imeis, newQty, isIphoneDevice(item.product))
+    }
   }
+}
+
+function ensureImeiSlots() {
+  for (const item of cart.value) {
+    if (isPhoneCategory(item.product.category)) {
+      item.imeis = resizeImeiDrafts(item.imeis, item.quantity, isIphoneDevice(item.product))
+    }
+  }
+  for (const item of tradeInEntries.value) {
+    if (isPhoneCategory(item.product.category)) {
+      item.imeis = resizeImeiDrafts(item.imeis, item.quantity, isIphoneDevice(item.product))
+    }
+  }
+}
+
+function validateSaleImeis(): string | null {
+  ensureImeiSlots()
+  return phoneImeiError([
+    ...cart.value.map((item) => ({
+      label: `${item.product.brand} ${item.product.model}`,
+      category: item.product.category,
+      quantity: item.quantity,
+      imeis: item.imeis,
+    })),
+    ...(paymentMethod.value === 'canje'
+      ? tradeInEntries.value.map((item) => ({
+          label: `Permuta ${item.product.brand} ${item.product.model}`,
+          category: item.product.category,
+          quantity: item.quantity,
+          imeis: item.imeis,
+        }))
+      : []),
+  ])
 }
 
 function removeFromCart(productId: string) {
@@ -264,6 +342,7 @@ function goToStep2() {
     appStore.showToast(validation.errors[0]!, 'error')
     return
   }
+  ensureImeiSlots()
   step.value = 2
 }
 
@@ -274,6 +353,16 @@ async function confirmSale() {
   }
   if (paymentMethod.value === 'credito' && !creditDueDate.value) {
     appStore.showToast('Indica la fecha del pago final', 'error')
+    return
+  }
+  const imeiError = validateSaleImeis()
+  if (imeiError) {
+    appStore.showToast(imeiError, 'error')
+    return
+  }
+  const accountError = appleAccountError(appleAccount.value)
+  if (accountError) {
+    appStore.showToast(accountError, 'error')
     return
   }
   processing.value = true
@@ -290,6 +379,7 @@ async function confirmSale() {
       paymentMethod.value === 'credito'
         ? { downPayment: creditDownPayment.value || 0, dueDate: creditDueDate.value || undefined }
         : null,
+      appleAccount.value,
     )
     await productsStore.loadProducts()
     appStore.showToast('Venta registrada correctamente', 'success')
@@ -313,6 +403,7 @@ function reset() {
   contactSearchQuery.value = ''
   paymentMethod.value = 'efectivo'
   notes.value = ''
+  appleAccount.value = emptyAppleAccountDraft()
   discountType.value = 'fixed'
   discountValue.value = 0
   tradeInEntries.value = []
@@ -379,7 +470,13 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
                 {{ product.brand }} {{ product.model }}
                 <span v-if="product.variant" class="text-zinc-400"> — {{ product.variant }}</span>
               </p>
-              <p class="text-xs text-zinc-500">Stock: {{ product.stock }}</p>
+              <p class="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-zinc-500">
+                <span>Stock: {{ product.stock }}</span>
+                <BatteryHealthBadge
+                  v-if="acceptsBatteryHealth(product)"
+                  :health="product.batteryHealth"
+                />
+              </p>
             </div>
             <span class="text-sm font-medium text-accent">{{ formatCurrency(product.price) }}</span>
           </button>
@@ -409,7 +506,13 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
               <p class="truncate text-sm text-zinc-100">
                 {{ item.product.brand }} {{ item.product.model }}
               </p>
-              <p class="text-xs text-zinc-500">{{ formatCurrency(item.product.price) }} c/u</p>
+              <p class="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-zinc-500">
+                <span>{{ formatCurrency(item.product.price) }} c/u</span>
+                <BatteryHealthBadge
+                  v-if="acceptsBatteryHealth(item.product)"
+                  :health="item.product.batteryHealth"
+                />
+              </p>
             </div>
             <div class="flex items-center gap-3">
               <div class="flex items-center gap-1">
@@ -685,6 +788,11 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
                   <span class="text-sm text-zinc-100">
                     {{ product.brand }} {{ product.model }}
                     <span v-if="product.variant" class="text-zinc-400"> — {{ product.variant }}</span>
+                    <BatteryHealthBadge
+                      v-if="acceptsBatteryHealth(product)"
+                      :health="product.batteryHealth"
+                      class="ml-1 align-middle"
+                    />
                   </span>
                   <span class="text-xs text-zinc-500">Stock: {{ product.stock }}</span>
                 </button>
@@ -746,6 +854,12 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
                   {{ formatCurrency(item.unitValue * item.quantity) }}
                 </span>
               </div>
+              <ImeiUnitFields
+                v-if="isPhoneCategory(item.product.category)"
+                class="mt-3"
+                :units="item.imeis"
+                received
+              />
             </div>
 
             <div class="flex items-center justify-between px-1 pt-1 text-sm">
@@ -791,6 +905,8 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
           </div>
         </div>
 
+        <AppleAccountFields :account="appleAccount" />
+
         <div>
           <label class="mb-1 block text-sm text-zinc-400">Notas</label>
           <textarea v-model="notes" rows="2" class="input-field resize-none" />
@@ -800,11 +916,22 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
       <div class="rounded-xl border border-border bg-surface-raised p-6">
         <h3 class="mb-4 text-sm font-medium text-zinc-300">Resumen</h3>
         <div class="space-y-2">
-          <div v-for="item in cart" :key="item.product.id" class="flex justify-between text-sm">
-            <span class="text-zinc-400">
-              {{ item.product.brand }} {{ item.product.model }} × {{ item.quantity }}
-            </span>
-            <span class="text-zinc-200">{{ formatCurrency(item.product.price * item.quantity) }}</span>
+          <div v-for="item in cart" :key="item.product.id" class="space-y-2 text-sm">
+            <div class="flex justify-between gap-3">
+              <span class="text-zinc-400">
+                {{ item.product.brand }} {{ item.product.model }} × {{ item.quantity }}
+                <BatteryHealthBadge
+                  v-if="acceptsBatteryHealth(item.product)"
+                  :health="item.product.batteryHealth"
+                  class="ml-1 align-middle"
+                />
+              </span>
+              <span class="shrink-0 text-zinc-200">{{ formatCurrency(item.product.price * item.quantity) }}</span>
+            </div>
+            <ImeiUnitFields
+              v-if="isPhoneCategory(item.product.category)"
+              :units="item.imeis"
+            />
           </div>
         </div>
         <div class="mt-4 space-y-2 border-t border-border pt-4">
@@ -886,7 +1013,6 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
       :price-required="false"
       :stock-default="1"
       condition-default="segunda_mano"
-      condition-all-categories
       @save="handleCreateTradeInProduct"
     />
 

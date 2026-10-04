@@ -18,13 +18,13 @@ export type MovementType = 'in' | 'out' | 'adjustment'
 
 export interface Product {
   id: string
-  sku?: string
   brand: string
   model: string
   variant?: string
   category: ProductCategory
-  /** Solo aplica a celulares: inventario por modelo, no por unidad */
   condition?: ProductCondition
+  /** Salud de batería, 1–100. Solo productos de segunda mano. */
+  batteryHealth?: number
   price: number
   cost: number
   stock: number
@@ -36,12 +36,26 @@ export interface Product {
   updatedAt: string
 }
 
+/** Cuenta Apple creada para el cliente durante la venta. */
+export interface AppleAccount {
+  appleId: string
+  password?: string
+}
+
+export interface DeviceImeis {
+  imei: string
+  /** Segunda línea o eSIM. Solo si se capturó en la venta. */
+  imei2?: string
+}
+
 export interface SaleItem {
   productId: string
   productName: string
   quantity: number
   unitPrice: number
   subtotal: number
+  /** IMEIs de los teléfonos vendidos, un par por unidad. Se capturan en la venta. */
+  imeis?: DeviceImeis[]
 }
 
 /** Equipo recibido a cuenta (canje / trade-in); entra al inventario */
@@ -51,6 +65,8 @@ export interface TradeInItem {
   quantity: number
   /** Valor acordado por unidad (crédito otorgado al cliente) */
   unitValue: number
+  /** IMEIs de los teléfonos recibidos en permuta, un par por unidad. */
+  imeis?: DeviceImeis[]
 }
 
 export type RefundMethod = 'efectivo' | 'tarjeta' | 'transferencia'
@@ -93,6 +109,16 @@ export interface Contact {
   updatedAt: string
 }
 
+/** Abono registrado después de la venta contra el saldo a crédito. */
+export interface CreditPayment {
+  date: string
+  amount: number
+  /** Saldo que quedó después del abono. Los abonos viejos no lo tienen. */
+  balanceAfter?: number
+  /** Fecha del siguiente pago acordada en ese momento, si quedó saldo. */
+  nextDueDate?: string
+}
+
 export interface Sale {
   id: string
   date: string
@@ -123,7 +149,7 @@ export interface Sale {
   /** Si el saldo a crédito ya fue liquidado */
   creditPaid?: boolean
   /** Abonos registrados después de la venta (para saldar el crédito) */
-  creditPayments?: { date: string; amount: number }[]
+  creditPayments?: CreditPayment[]
   /** Devoluciones registradas contra esta venta */
   returns?: SaleReturn[]
   /** Suma reembolsada por devoluciones (reduce el ingreso neto) */
@@ -132,7 +158,11 @@ export interface Sale {
   returnStatus?: 'partial' | 'full'
   /** Tipo de cambio (Bs por 1 USD) vigente al crear la venta; congela el equivalente en USD del histórico */
   exchangeRate?: number
+  /** Cuenta Apple entregada al cliente. Opcional. */
+  appleAccount?: AppleAccount
   notes?: string
+  /** Venta importada desde la planilla histórica; identifica la fila para no duplicarla. */
+  importKey?: string
   createdAt: string
 }
 
@@ -155,7 +185,6 @@ export interface PurchaseOrderItem {
   brand: string
   model: string
   variant?: string
-  sku?: string
   category: ProductCategory
   condition: ProductCondition
   /** Precio de venta sugerido; se usa al crear el producto si es un modelo nuevo */
@@ -222,7 +251,7 @@ export interface DashboardKPIs {
 
 export type InventoryTableColumn =
   | 'product'
-  | 'sku'
+  | 'batteryHealth'
   | 'category'
   | 'condition'
   | 'price'

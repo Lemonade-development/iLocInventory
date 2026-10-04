@@ -3,12 +3,15 @@ import { PackageMinus, Trash2, X } from 'lucide-vue-next'
 
 defineProps<{
   count: number
+  /** Total que coincide con los filtros (todas las páginas). */
+  totalCount?: number
 }>()
 
 const emit = defineEmits<{
   adjustStock: []
   delete: []
   clear: []
+  selectAll: []
 }>()
 </script>
 
@@ -26,6 +29,14 @@ const emit = defineEmits<{
         @click="emit('clear')"
       >
         <X :size="14" class="inline" /> Deseleccionar
+      </button>
+      <button
+        v-if="totalCount && count < totalCount"
+        type="button"
+        class="text-xs text-accent transition hover:text-accent-hover"
+        @click="emit('selectAll')"
+      >
+        Seleccionar los {{ totalCount }} del filtro
       </button>
     </div>
     <div class="flex gap-2">

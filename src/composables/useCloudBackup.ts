@@ -7,6 +7,7 @@ import {
   type ExportData,
 } from '@/services/storage'
 import { useCurrency } from '@/composables/useCurrency'
+import { todayIsoDate } from '@/utils/format'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 
 const AUTO_KEY = 'iloc-cloud-auto-backup'
@@ -121,7 +122,13 @@ export function useCloudBackup() {
 
     let handle: FileSystemDirectoryHandle
     try {
-      handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'iloc-backup' })
+      // Abre en Documentos: con "Escritorio y Documentos" de iCloud activado es la
+      // carpeta sincronizada que Chrome deja usar en cualquier versión.
+      handle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        id: 'iloc-backup',
+        startIn: 'documents',
+      })
     } catch (error) {
       return { ok: false, reason: classifyPickerError(error), error }
     }
@@ -172,7 +179,7 @@ export function useCloudBackup() {
 
     try {
       const data = await buildBackupData()
-      const filename = `iloc-backup-${new Date().toISOString().slice(0, 10)}.json`
+      const filename = `iloc-backup-${todayIsoDate()}.json`
       const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
       const writable = await fileHandle.createWritable()
       await writable.write(JSON.stringify(data, null, 2))

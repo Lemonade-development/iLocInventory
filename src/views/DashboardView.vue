@@ -15,6 +15,7 @@ import { useProductsStore } from '@/stores/products'
 import { useSalesStore } from '@/stores/sales'
 import { usePurchaseOrdersStore } from '@/stores/purchaseOrders'
 import { formatCurrency } from '@/utils/format'
+import { minStockOf } from '@/utils/product'
 
 const router = useRouter()
 const productsStore = useProductsStore()
@@ -119,7 +120,7 @@ onMounted(async () => {
             <p class="truncate text-sm text-zinc-200">
               {{ product.brand }} {{ product.model }}
             </p>
-            <p class="text-xs text-zinc-500">Mín: {{ product.minStock ?? 5 }}</p>
+            <p class="text-xs text-zinc-500">Mín: {{ minStockOf(product) }}</p>
           </div>
           <span class="ml-2 font-medium text-warning">{{ product.stock }}</span>
         </div>

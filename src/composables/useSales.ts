@@ -18,7 +18,19 @@ import {
   saveSale,
 } from '@/services/storage'
 import { generateId } from '@/utils/id'
-import { getConditionLabel } from '@/utils/product'
+import { formatProductName } from '@/utils/product'
+import {
+  imeiMatchesQuery,
+  isPhoneCategory,
+  phoneImeiError,
+  toStoredImeis,
+  type ImeiDraft,
+} from '@/utils/imei'
+import {
+  appleAccountError,
+  toStoredAppleAccount,
+  type AppleAccountDraft,
+} from '@/utils/appleAccount'
 import { useCurrency } from '@/composables/useCurrency'
 import { useCloudBackup } from '@/composables/useCloudBackup'
 import { isAfter, isBefore, parseISO, startOfDay, startOfWeek } from 'date-fns'
@@ -26,6 +38,8 @@ import { isAfter, isBefore, parseISO, startOfDay, startOfWeek } from 'date-fns'
 export interface CartItem {
   product: Product
   quantity: number
+  /** Un par de IMEIs por unidad cuando el producto es un teléfono. */
+  imeis: ImeiDraft[]
 }
 
 export interface Discount {
@@ -38,6 +52,8 @@ export interface TradeInEntry {
   quantity: number
   /** Valor acordado por unidad (crédito otorgado al cliente) */
   unitValue: number
+  /** Un par de IMEIs por unidad cuando el equipo recibido es un teléfono. */
+  imeis: ImeiDraft[]
 }
 
 /** Devuelve una copia plana (sin proxies reactivos) apta para IndexedDB. */
@@ -68,7 +84,16 @@ export function useSales() {
           s.customerName?.toLowerCase().includes(q) ||
           s.customerPhone?.toLowerCase().includes(q) ||
           s.id.toLowerCase().includes(q) ||
-          s.items.some((i) => i.productName.toLowerCase().includes(q)),
+          s.items.some(
+            (i) =>
+              i.productName.toLowerCase().includes(q) ||
+              imeiMatchesQuery(i.imeis, q),
+          ) ||
+          s.tradeInItems?.some(
+            (t) =>
+              t.productName.toLowerCase().includes(q) ||
+              imeiMatchesQuery(t.imeis, q),
+          ),
       )
     }
 
@@ -162,24 +187,44 @@ export function useSales() {
     tradeInItems?: TradeInEntry[] | null,
     contactId?: string,
     credit?: { downPayment: number; dueDate?: string } | null,
+    appleAccount?: AppleAccountDraft | null,
   ): Promise<Sale> {
     const validation = validateCart(cart)
     if (!validation.valid) throw new Error(validation.errors.join('\n'))
+
+    const imeiError = phoneImeiError([
+      ...cart.map((item) => ({
+        label: `${item.product.brand} ${item.product.model}`,
+        category: item.product.category,
+        quantity: item.quantity,
+        imeis: item.imeis,
+      })),
+      ...((paymentMethod === 'canje' ? tradeInItems : null) ?? []).map((item) => ({
+        label: `Permuta ${item.product.brand} ${item.product.model}`,
+        category: item.product.category,
+        quantity: item.quantity,
+        imeis: item.imeis,
+      })),
+    ])
+    if (imeiError) throw new Error(imeiError)
+
+    const accountError = appleAccount ? appleAccountError(appleAccount) : null
+    if (accountError) throw new Error(accountError)
 
     const { exchangeRate } = useCurrency()
     const now = new Date().toISOString()
     const saleId = generateId()
 
     const items: SaleItem[] = cart.map((item) => {
-      const conditionLabel = getConditionLabel(item.product.condition)
-      const conditionSuffix =
-        item.product.category === 'celular' && conditionLabel ? ` (${conditionLabel})` : ''
       return {
         productId: item.product.id,
-        productName: `${item.product.brand} ${item.product.model}${item.product.variant ? ` ${item.product.variant}` : ''}${conditionSuffix}`,
+        productName: formatProductName(item.product),
         quantity: item.quantity,
         unitPrice: item.product.price,
         subtotal: item.product.price * item.quantity,
+        imeis: isPhoneCategory(item.product.category)
+          ? toStoredImeis(item.imeis, item.quantity)
+          : undefined,
       }
     })
 
@@ -215,11 +260,12 @@ export function useSales() {
       tradeInItems: tradeIns.length
         ? tradeIns.map((t) => ({
             productId: t.product.id,
-            productName: [t.product.brand, t.product.model, t.product.variant]
-              .filter(Boolean)
-              .join(' '),
+            productName: formatProductName(t.product),
             quantity: t.quantity,
             unitValue: t.unitValue || 0,
+            imeis: isPhoneCategory(t.product.category)
+              ? toStoredImeis(t.imeis, t.quantity)
+              : undefined,
           }))
         : undefined,
       tradeInValue: tradeInTotal > 0 ? tradeInTotal : undefined,
@@ -228,6 +274,7 @@ export function useSales() {
       creditDueDate: isCredit ? credit!.dueDate : undefined,
       creditPaid: isCredit ? creditBalance! <= 0 : undefined,
       exchangeRate: exchangeRate.value,
+      appleAccount: appleAccount ? toStoredAppleAccount(appleAccount) : undefined,
       notes,
       createdAt: now,
     }
@@ -301,14 +348,20 @@ export function useSales() {
     const currentBalance = existing.creditBalance ?? 0
     const applied = Math.min(Math.max(amount, 0), currentBalance)
     const newBalance = currentBalance - applied
+    const creditDueDate = newBalance > 0 && nextDueDate ? nextDueDate : existing.creditDueDate
     const updated: Sale = toPlainSale({
       ...existing,
       creditBalance: newBalance,
       creditPaid: newBalance <= 0,
-      creditDueDate: newBalance > 0 && nextDueDate ? nextDueDate : existing.creditDueDate,
+      creditDueDate,
       creditPayments: [
         ...(existing.creditPayments ?? []),
-        { date: new Date().toISOString(), amount: applied },
+        {
+          date: new Date().toISOString(),
+          amount: applied,
+          balanceAfter: newBalance,
+          nextDueDate: newBalance > 0 ? creditDueDate : undefined,
+        },
       ],
     })
     await saveSale(updated)

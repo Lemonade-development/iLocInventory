@@ -116,3 +116,7 @@ input[type='checkbox']:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+/* Controles de filtro junto al buscador de las tablas (listas desplegables y fechas). */
+.toolbar-control {
+  @apply rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-zinc-200 focus:border-accent focus:outline-none;
+}
