@@ -5,6 +5,8 @@ import { Search, Package, ShoppingCart } from 'lucide-vue-next'
 import { useProductsStore } from '@/stores/products'
 import { useAppStore } from '@/stores/app'
 import { formatCurrency } from '@/utils/format'
+import { acceptsBatteryHealth } from '@/utils/product'
+import BatteryHealthBadge from '@/components/inventory/BatteryHealthBadge.vue'
 
 const router = useRouter()
 const productsStore = useProductsStore()
@@ -84,8 +86,12 @@ function onBlur() {
             {{ product.brand }} {{ product.model }}
             <span v-if="product.variant" class="font-normal text-zinc-400">{{ product.variant }}</span>
           </p>
-          <p class="mt-0.5 text-sm text-zinc-500">
-            Stock: {{ product.stock }} · {{ formatCurrency(product.price) }}
+          <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-zinc-500">
+            <span>Stock: {{ product.stock }} · {{ formatCurrency(product.price) }}</span>
+            <BatteryHealthBadge
+              v-if="acceptsBatteryHealth(product)"
+              :health="product.batteryHealth"
+            />
           </p>
         </div>
         <span

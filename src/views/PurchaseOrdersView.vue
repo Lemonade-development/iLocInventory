@@ -1,17 +1,34 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Plus, PackageCheck, Pencil, X, Truck, Trash2, Calendar, FileDown } from 'lucide-vue-next'
-import type { PurchaseOrder, PurchaseOrderFormData, PurchaseOrderStatus } from '@/types'
+import { ref, computed, onMounted } from 'vue'
+import { Plus, PackageCheck, Pencil, X, Trash2, FileDown, Printer } from 'lucide-vue-next'
+import type { PurchaseOrder, PurchaseOrderFormData } from '@/types'
 import PurchaseOrderFormModal from '@/components/purchase/PurchaseOrderFormModal.vue'
 import ReceivePurchaseOrderModal from '@/components/purchase/ReceivePurchaseOrderModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import SortableTh from '@/components/common/SortableTh.vue'
+import TableToolbar from '@/components/common/TableToolbar.vue'
+import TablePagination from '@/components/common/TablePagination.vue'
+import { usePagination } from '@/composables/usePagination'
+import TableEmptyRow from '@/components/common/TableEmptyRow.vue'
+import SegmentedControl from '@/components/common/SegmentedControl.vue'
+import { ACTIVE_ROW_CLASS } from '@/utils/table'
+import RowActionsMenu, { type RowAction } from '@/components/common/RowActionsMenu.vue'
+import PurchaseOrderDetailSidebar from '@/components/purchase/PurchaseOrderDetailSidebar.vue'
+import PurchaseOrderCompletedModal, {
+  type PurchaseOrderCompletion,
+} from '@/components/purchase/PurchaseOrderCompletedModal.vue'
+import { useTableSort, type SortValue } from '@/composables/useTableSort'
 import { usePurchaseOrdersStore } from '@/stores/purchaseOrders'
 import { useProductsStore } from '@/stores/products'
 import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
-import { CONDITION_LABELS } from '@/utils/product'
-import { downloadPurchaseOrder } from '@/services/pdf'
+import {
+  PURCHASE_ORDER_STATUS_COLORS as statusColors,
+  PURCHASE_ORDER_STATUS_LABELS as statusLabels,
+  purchaseOrderItemName as itemName,
+} from '@/utils/purchaseOrder'
+import { downloadPurchaseOrder, printPurchaseOrder } from '@/services/pdfDownload'
 import { formatCurrency, formatDate } from '@/utils/format'
 
 const store = usePurchaseOrdersStore()
@@ -27,30 +44,157 @@ const showCancelConfirm = ref(false)
 const cancelingId = ref<string | null>(null)
 const showDeleteConfirm = ref(false)
 const deletingId = ref<string | null>(null)
+const showDetail = ref(false)
+
+// Orden recién creada, editada o recibida: alimenta la pantalla con Imprimir orden.
+const completedOrderId = ref<string | null>(null)
+const completedMode = ref<PurchaseOrderCompletion>('created')
+const completedLines = ref<{ name: string; quantity: number }[]>([])
+const showCompleted = ref(false)
+const completedOrder = computed(
+  () => store.purchaseOrders.find((o) => o.id === completedOrderId.value) ?? null,
+)
+
+function showCompletion(orderId: string, mode: PurchaseOrderCompletion) {
+  completedOrderId.value = orderId
+  completedMode.value = mode
+  showCompleted.value = true
+}
+const detailId = ref<string | null>(null)
+
+// Se lee del store para que la ficha refleje recepciones y cambios.
+const detailOrder = computed(
+  () => store.purchaseOrders.find((o) => o.id === detailId.value) ?? null,
+)
+
+type SortKey = 'code' | 'date' | 'supplier' | 'received' | 'expectedDate' | 'status' | 'total'
+
+const STATUS_ORDER = { pending: 0, partial: 1, received: 2, cancelled: 3 } as const
+
+function unitsOrdered(order: PurchaseOrder): number {
+  return order.items.reduce((sum, i) => sum + i.quantity, 0)
+}
+
+function unitsReceived(order: PurchaseOrder): number {
+  return order.items.reduce((sum, i) => sum + i.receivedQuantity, 0)
+}
+
+function sortValue(order: PurchaseOrder, key: SortKey): SortValue {
+  switch (key) {
+    case 'code':
+      return order.code
+    case 'date':
+      return order.date
+    case 'supplier':
+      return order.supplierName
+    case 'received': {
+      const ordered = unitsOrdered(order)
+      return ordered ? unitsReceived(order) / ordered : null
+    }
+    case 'expectedDate':
+      return order.expectedDate || null
+    case 'status':
+      return STATUS_ORDER[order.status]
+    case 'total':
+      return order.total
+  }
+}
+
+type StatusFilter = 'all' | 'open' | 'received' | 'cancelled'
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'open', label: 'Por recibir' },
+  { value: 'received', label: 'Recibidas' },
+  { value: 'cancelled', label: 'Canceladas' },
+]
+
+const search = ref('')
+const statusFilter = ref<StatusFilter>('all')
+
+const hasActiveFilters = computed(() => !!search.value.trim() || statusFilter.value !== 'all')
+
+function clearFilters() {
+  search.value = ''
+  statusFilter.value = 'all'
+}
+
+function matchesStatus(order: PurchaseOrder): boolean {
+  if (statusFilter.value === 'open') return isOpenOrder(order)
+  if (statusFilter.value === 'received') return order.status === 'received'
+  if (statusFilter.value === 'cancelled') return order.status === 'cancelled'
+  return true
+}
+
+const orders = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return store.purchaseOrders.filter((order) => {
+    if (!matchesStatus(order)) return false
+    if (!q) return true
+    return (
+      order.code.toLowerCase().includes(q) ||
+      order.supplierName.toLowerCase().includes(q) ||
+      order.items.some((item) => itemName(item).toLowerCase().includes(q))
+    )
+  })
+})
+const { sortKey, sortDir, toggleSort, dirFor, sorted: sortedOrders } = useTableSort(orders, sortValue)
+
+const {
+  page,
+  pageSize,
+  pageCount,
+  pagedRows: pagedOrders,
+} = usePagination(sortedOrders, { resetOn: [search, statusFilter, sortKey, sortDir] })
+
+const columns: { key: SortKey; label: string; align?: 'right' }[] = [
+  { key: 'code', label: 'Folio' },
+  { key: 'date', label: 'Fecha' },
+  { key: 'supplier', label: 'Proveedor' },
+]
+const trailingColumns: { key: SortKey; label: string; align?: 'right' }[] = [
+  { key: 'received', label: 'Recibido' },
+  { key: 'expectedDate', label: 'Entrega' },
+  { key: 'status', label: 'Estado' },
+  { key: 'total', label: 'Total', align: 'right' },
+]
+
+function isOpenOrder(order: PurchaseOrder): boolean {
+  return order.status === 'pending' || order.status === 'partial'
+}
+
+function orderActions(order: PurchaseOrder): RowAction[] {
+  const actions: RowAction[] = []
+  if (isOpenOrder(order)) actions.push({ key: 'receive', label: 'Recibir mercancía', icon: PackageCheck })
+  if (order.status === 'pending') actions.push({ key: 'edit', label: 'Editar', icon: Pencil })
+  actions.push(
+    { key: 'print', label: 'Imprimir orden', icon: Printer },
+    { key: 'download', label: 'Descargar PDF', icon: FileDown },
+  )
+  if (isOpenOrder(order)) actions.push({ key: 'cancel', label: 'Cancelar orden', icon: X, danger: true })
+  else actions.push({ key: 'delete', label: 'Eliminar', icon: Trash2, danger: true })
+  return actions
+}
+
+function runAction(order: PurchaseOrder, key: string) {
+  if (key === 'receive') openReceive(order)
+  else if (key === 'edit') openEdit(order)
+  else if (key === 'print') printPurchaseOrder(order)
+  else if (key === 'download') downloadPurchaseOrder(order)
+  else if (key === 'cancel') askCancel(order.id)
+  else if (key === 'delete') askDelete(order.id)
+}
+
+function openDetail(order: PurchaseOrder) {
+  detailId.value = order.id
+  showDetail.value = true
+}
 
 onMounted(() => {
   store.loadPurchaseOrders()
   productsStore.loadProducts()
   contactsStore.loadContacts()
 })
-
-const statusLabels: Record<PurchaseOrderStatus, string> = {
-  pending: 'Pendiente',
-  partial: 'Parcial',
-  received: 'Recibido',
-  cancelled: 'Cancelado',
-}
-
-const statusColors: Record<PurchaseOrderStatus, string> = {
-  pending: 'bg-warning/20 text-warning',
-  partial: 'bg-sky-500/20 text-sky-400',
-  received: 'bg-success/20 text-success',
-  cancelled: 'bg-zinc-700 text-zinc-400',
-}
-
-function itemName(item: PurchaseOrder['items'][number]): string {
-  return [item.brand, item.model, item.variant].filter(Boolean).join(' ')
-}
 
 function openCreate() {
   editingOrder.value = null
@@ -64,14 +208,12 @@ function openEdit(order: PurchaseOrder) {
 
 async function handleSave(data: PurchaseOrderFormData) {
   try {
-    if (editingOrder.value) {
-      await store.updatePurchaseOrder(editingOrder.value.id, data)
-      appStore.showToast('Orden de compra actualizada', 'success')
-    } else {
-      await store.createPurchaseOrder(data)
-      appStore.showToast('Orden de compra creada', 'success')
-    }
+    const editing = editingOrder.value
+    const saved = editing
+      ? await store.updatePurchaseOrder(editing.id, data)
+      : await store.createPurchaseOrder(data)
     showForm.value = false
+    showCompletion(saved.id, editing ? 'updated' : 'created')
   } catch (e) {
     appStore.showToast(e instanceof Error ? e.message : 'Error al guardar la orden', 'error')
   }
@@ -83,11 +225,23 @@ function openReceive(order: PurchaseOrder) {
 }
 
 async function handleReceive(receipts: Record<number, number>) {
-  if (!receivingOrder.value) return
+  const order = receivingOrder.value
+  if (!order) return
+  // Lo que entra ahora, con el mismo tope que aplica el store (lo pendiente de cada línea).
+  const lines = order.items
+    .map((item, idx) => ({
+      name: itemName(item),
+      quantity: Math.min(
+        Math.max(0, Math.floor(receipts[idx] ?? 0)),
+        item.quantity - item.receivedQuantity,
+      ),
+    }))
+    .filter((line) => line.quantity > 0)
   try {
-    await store.receivePurchaseOrder(receivingOrder.value.id, receipts)
+    await store.receivePurchaseOrder(order.id, receipts)
     await productsStore.loadProducts()
-    appStore.showToast('Mercancía recibida e ingresada a inventario', 'success')
+    completedLines.value = lines
+    showCompletion(order.id, 'received')
   } catch (e) {
     appStore.showToast(e instanceof Error ? e.message : 'Error al recibir la mercancía', 'error')
   }
@@ -130,134 +284,133 @@ async function handleDelete() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <p class="text-sm text-zinc-500">
-        {{ store.openPurchaseOrders.length }} por recibir · {{ store.purchaseOrders.length }} en total
-      </p>
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-        @click="openCreate"
-      >
-        <Plus :size="16" />
-        Nueva orden de compra
-      </button>
-    </div>
+    <TableToolbar
+      v-model:search="search"
+      search-placeholder="Folio, proveedor o producto..."
+      :filtered="hasActiveFilters"
+      @clear="clearFilters"
+    >
+      <template #filters>
+        <SegmentedControl v-model="statusFilter" :options="STATUS_OPTIONS" />
+      </template>
+      <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          @click="openCreate"
+        >
+          <Plus :size="16" />
+          Nueva orden de compra
+        </button>
+      </template>
+      <template #summary>
+        <span>
+          {{ sortedOrders.length }}
+          <template v-if="hasActiveFilters">de {{ store.purchaseOrders.length }}</template>
+          orden(es)
+        </span>
+        <span v-if="store.openPurchaseOrders.length > 0" class="text-warning">
+          {{ store.openPurchaseOrders.length }} por recibir
+        </span>
+      </template>
+    </TableToolbar>
 
     <LoadingSpinner v-if="store.loading" label="Cargando órdenes de compra..." />
 
-    <div v-else class="space-y-3">
-      <div
-        v-for="order in store.purchaseOrders"
-        :key="order.id"
-        class="rounded-xl border border-border bg-surface-raised p-5"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-3">
-              <h3 class="font-medium text-zinc-100">{{ order.code }}</h3>
+    <div v-else class="overflow-x-auto rounded-xl border border-border">
+      <table class="w-full min-w-[960px] text-left text-sm">
+        <thead class="border-b border-border bg-surface-overlay text-xs uppercase text-zinc-500">
+          <tr>
+            <th class="w-12 py-3 pl-3 pr-1.5"><span class="sr-only">Acciones</span></th>
+            <SortableTh
+              v-for="col in columns"
+              :key="col.key"
+              :label="col.label"
+              :dir="dirFor(col.key)"
+              :align="col.align"
+              @sort="toggleSort(col.key)"
+            />
+            <th class="px-4 py-3 font-medium">Productos</th>
+            <SortableTh
+              v-for="col in trailingColumns"
+              :key="col.key"
+              :label="col.label"
+              :dir="dirFor(col.key)"
+              :align="col.align"
+              @sort="toggleSort(col.key)"
+            />
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          <tr
+            v-for="order in pagedOrders"
+            :key="order.id"
+            class="cursor-pointer transition hover:bg-surface-overlay/50"
+            :class="{ [ACTIVE_ROW_CLASS]: detailId === order.id }"
+            @click="openDetail(order)"
+          >
+            <td class="py-3 pl-3 pr-1.5" @click.stop>
+              <RowActionsMenu :items="orderActions(order)" @select="runAction(order, $event)" />
+            </td>
+            <td class="whitespace-nowrap px-4 py-3 font-medium text-zinc-100">{{ order.code }}</td>
+            <td class="whitespace-nowrap px-4 py-3 text-zinc-300">{{ formatDate(order.date) }}</td>
+            <td class="px-4 py-3 text-zinc-200">{{ order.supplierName }}</td>
+            <td class="max-w-[18rem] px-4 py-3">
+              <p class="truncate text-zinc-300" :title="order.items.map(itemName).join(', ')">
+                {{ order.items[0] ? itemName(order.items[0]) : '—' }}
+              </p>
+              <p v-if="order.items.length > 1" class="text-xs text-zinc-500">
+                y {{ order.items.length - 1 }} producto(s) más
+              </p>
+            </td>
+            <td class="whitespace-nowrap px-4 py-3">
               <span
-                class="rounded-md px-2 py-0.5 text-xs font-medium"
-                :class="statusColors[order.status]"
+                class="tabular-nums"
+                :class="unitsReceived(order) >= unitsOrdered(order) ? 'text-success' : 'text-zinc-300'"
               >
+                {{ unitsReceived(order) }}/{{ unitsOrdered(order) }}
+              </span>
+              <span class="text-xs text-zinc-500"> unid.</span>
+            </td>
+            <td class="whitespace-nowrap px-4 py-3 text-zinc-400">
+              {{ order.expectedDate ? formatDate(order.expectedDate) : '—' }}
+            </td>
+            <td class="px-4 py-3">
+              <span class="rounded-md px-2 py-0.5 text-xs font-medium" :class="statusColors[order.status]">
                 {{ statusLabels[order.status] }}
               </span>
-              <span class="flex items-center gap-1.5 text-sm text-zinc-400">
-                <Truck :size="14" /> {{ order.supplierName }}
+            </td>
+            <td class="whitespace-nowrap px-4 py-3 text-right font-medium">
+              <span :class="order.status === 'cancelled' ? 'text-zinc-500 line-through' : 'text-zinc-100'">
+                {{ formatCurrency(order.total) }}
               </span>
-            </div>
-            <p class="mt-1 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
-              <span>{{ formatDate(order.date) }}</span>
-              <span v-if="order.expectedDate" class="flex items-center gap-1">
-                <Calendar :size="13" /> Entrega: {{ formatDate(order.expectedDate) }}
-              </span>
-            </p>
-
-            <ul class="mt-3 space-y-1">
-              <li
-                v-for="(item, idx) in order.items"
-                :key="idx"
-                class="flex items-center gap-2 text-sm text-zinc-300"
-              >
-                <span class="tabular-nums text-zinc-500">
-                  {{ item.receivedQuantity }}/{{ item.quantity }}×
-                </span>
-                <span class="truncate">{{ itemName(item) }}</span>
-                <span
-                  class="rounded px-1.5 py-0.5 text-xs font-medium"
-                  :class="item.condition === 'nuevo' ? 'bg-accent/15 text-accent' : 'bg-warning/15 text-warning'"
-                >
-                  {{ CONDITION_LABELS[item.condition] }}
-                </span>
-                <span class="ml-auto text-xs text-zinc-500">
-                  {{ formatCurrency(item.unitCost * item.quantity) }}
-                </span>
-              </li>
-            </ul>
-
-            <p v-if="order.notes" class="mt-2 text-xs text-zinc-500">{{ order.notes }}</p>
-
-            <p class="mt-3 text-sm text-zinc-400">
-              Total: <span class="font-semibold text-zinc-100">{{ formatCurrency(order.total) }}</span>
-            </p>
-          </div>
-
-          <div class="flex shrink-0 flex-col items-end gap-2">
-            <div class="flex gap-2">
-              <button
-                type="button"
-                title="Descargar orden en PDF"
-                class="rounded-lg border border-border p-1.5 text-zinc-400 hover:border-accent hover:text-accent"
-                @click="downloadPurchaseOrder(order)"
-              >
-                <FileDown :size="15" />
-              </button>
-            </div>
-            <div v-if="order.status === 'pending' || order.status === 'partial'" class="flex gap-2">
-              <button
-                type="button"
-                title="Recibir mercancía"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-white hover:bg-green-600"
-                @click="openReceive(order)"
-              >
-                <PackageCheck :size="14" />
-                Recibir
-              </button>
-              <button
-                v-if="order.status === 'pending'"
-                type="button"
-                title="Editar"
-                class="rounded-lg border border-border p-1.5 text-zinc-400 hover:bg-surface-overlay hover:text-zinc-100"
-                @click="openEdit(order)"
-              >
-                <Pencil :size="15" />
-              </button>
-              <button
-                type="button"
-                title="Cancelar"
-                class="rounded-lg p-1.5 text-zinc-500 hover:bg-surface-overlay hover:text-danger"
-                @click="askCancel(order.id)"
-              >
-                <X :size="16" />
-              </button>
-            </div>
-            <button
-              v-else
-              type="button"
-              title="Eliminar"
-              class="rounded-lg p-1.5 text-zinc-500 hover:bg-surface-overlay hover:text-danger"
-              @click="askDelete(order.id)"
-            >
-              <Trash2 :size="15" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <p v-if="store.purchaseOrders.length === 0" class="py-12 text-center text-zinc-500">
-        No hay órdenes de compra registradas
-      </p>
+            </td>
+          </tr>
+          <TableEmptyRow
+            v-if="sortedOrders.length === 0"
+            :colspan="9"
+            :filtered="hasActiveFilters && store.purchaseOrders.length > 0"
+            empty-text="No hay órdenes de compra registradas"
+            @clear="clearFilters"
+          />
+        </tbody>
+      </table>
     </div>
+    <TablePagination
+      v-if="!store.loading"
+      v-model:page="page"
+      :total="sortedOrders.length"
+      :page-size="pageSize"
+      :page-count="pageCount"
+    />
+
+    <PurchaseOrderDetailSidebar v-model="showDetail" :order="detailOrder" />
+    <PurchaseOrderCompletedModal
+      v-model="showCompleted"
+      :order="completedOrder"
+      :mode="completedMode"
+      :received-lines="completedLines"
+    />
 
     <PurchaseOrderFormModal v-model="showForm" :order="editingOrder" @save="handleSave" />
     <ReceivePurchaseOrderModal v-model="showReceive" :order="receivingOrder" @receive="handleReceive" />

@@ -33,7 +33,6 @@ type Row = {
   brand: string
   model: string
   variant?: string
-  sku?: string
   category: ProductCategory
   condition: ProductCondition
   price?: number
@@ -63,7 +62,6 @@ function emptyRow(): Row {
     brand: '',
     model: '',
     variant: '',
-    sku: '',
     category: 'celular',
     condition: 'nuevo',
     price: undefined,
@@ -147,7 +145,6 @@ function selectProduct(row: Row, product: Product) {
   row.brand = product.brand
   row.model = product.model
   row.variant = product.variant
-  row.sku = product.sku
   row.category = product.category
   row.condition = product.condition ?? 'nuevo'
   row.price = product.price
@@ -191,7 +188,6 @@ function submit() {
       brand: r.brand.trim(),
       model: r.model.trim(),
       variant: r.variant?.trim() || undefined,
-      sku: r.sku?.trim() || undefined,
       category: r.category,
       condition: r.condition,
       price: r.price != null ? Number(r.price) : undefined,

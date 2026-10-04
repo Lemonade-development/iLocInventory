@@ -39,7 +39,6 @@ function itemToProduct(item: PurchaseOrderItem, stock: number): Product {
   const now = new Date().toISOString()
   return {
     id: generateId(),
-    sku: item.sku || undefined,
     brand: item.brand,
     model: item.model,
     variant: item.variant || undefined,

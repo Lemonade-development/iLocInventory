@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { PackageMinus, Trash2, X } from 'lucide-vue-next'
+import { FileDown, Printer, X } from 'lucide-vue-next'
 
 defineProps<{
   count: number
   /** Total que coincide con los filtros (todas las páginas). */
   totalCount?: number
+  busy?: boolean
 }>()
 
 const emit = defineEmits<{
-  adjustStock: []
-  delete: []
+  print: []
+  download: []
   clear: []
   selectAll: []
 }>()
@@ -21,7 +22,7 @@ const emit = defineEmits<{
   >
     <div class="flex items-center gap-3">
       <span class="text-sm font-medium text-zinc-200">
-        {{ count }} producto{{ count !== 1 ? 's' : '' }} seleccionado{{ count !== 1 ? 's' : '' }}
+        {{ count }} venta{{ count !== 1 ? 's' : '' }} seleccionada{{ count !== 1 ? 's' : '' }}
       </span>
       <button
         type="button"
@@ -36,25 +37,27 @@ const emit = defineEmits<{
         class="text-xs text-accent transition hover:text-accent-hover"
         @click="emit('selectAll')"
       >
-        Seleccionar los {{ totalCount }} del filtro
+        Seleccionar las {{ totalCount }} del filtro
       </button>
     </div>
     <div class="flex gap-2">
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-zinc-200 transition hover:border-accent hover:text-accent"
-        @click="emit('adjustStock')"
+        :disabled="busy"
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-zinc-200 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        @click="emit('print')"
       >
-        <PackageMinus :size="16" />
-        Ajustar stock
+        <Printer :size="16" />
+        Imprimir tickets
       </button>
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger transition hover:bg-danger/20"
-        @click="emit('delete')"
+        :disabled="busy"
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-zinc-200 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        @click="emit('download')"
       >
-        <Trash2 :size="16" />
-        Eliminar
+        <FileDown :size="16" />
+        Descargar tickets
       </button>
     </div>
   </div>

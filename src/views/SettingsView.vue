@@ -10,6 +10,7 @@ import {
   Moon,
   Monitor,
   DollarSign,
+  Printer,
   Store,
   Save,
   Cloud,
@@ -17,18 +18,20 @@ import {
   LogOut,
   Shield,
   User,
+  Smartphone,
 } from 'lucide-vue-next'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useStorage } from '@/composables/useStorage'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useCurrency } from '@/composables/useCurrency'
+import { usePrintSettings } from '@/composables/usePrintSettings'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 import {
   useCloudBackup,
   buildBackupData,
   type BackupFailure,
 } from '@/composables/useCloudBackup'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, todayIsoDate } from '@/utils/format'
 import { useProductsStore } from '@/stores/products'
 import { useSalesStore } from '@/stores/sales'
 import { useAppStore } from '@/stores/app'
@@ -38,10 +41,12 @@ import PasswordInputForm from '@/components/auth/PasswordInputForm.vue'
 import { PASSWORD_REQUIREMENTS_HINT, USERNAME_REQUIREMENTS_HINT } from '@/services/auth'
 import UsernameInputForm from '@/components/auth/UsernameInputForm.vue'
 import type { ExportData } from '@/services/storage'
+import { addMissingIphoneCatalog } from '@/services/seed'
 
 const { backend, importData, resetData } = useStorage()
 const { preference, setTheme } = useTheme()
 const { exchangeRate, showUsd, setExchangeRate, setShowUsd } = useCurrency()
+const { autoPrint, setAutoPrint } = usePrintSettings()
 const {
   name: storeName,
   description: storeDescription,
@@ -291,6 +296,25 @@ const themeOptions: { value: ThemePreference; label: string; icon: typeof Sun }[
 
 const showResetConfirm = ref(false)
 const importing = ref(false)
+const loadingCatalog = ref(false)
+
+async function handleLoadCatalog() {
+  loadingCatalog.value = true
+  try {
+    const added = await addMissingIphoneCatalog()
+    await productsStore.loadProducts()
+    appStore.showToast(
+      added > 0
+        ? `${added} variante(s) de iPhone agregada(s) al inventario`
+        : 'El catálogo de iPhone ya estaba completo',
+      'success',
+    )
+  } catch {
+    appStore.showToast('Error al cargar el catálogo de iPhone', 'error')
+  } finally {
+    loadingCatalog.value = false
+  }
+}
 
 async function handleExportJson() {
   try {
@@ -299,7 +323,7 @@ async function handleExportJson() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `iloc-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `iloc-backup-${todayIsoDate()}.json`
     a.click()
     URL.revokeObjectURL(url)
     appStore.showToast('Respaldo JSON descargado', 'success')
@@ -311,7 +335,7 @@ async function handleExportJson() {
 async function handleExportCsv() {
   try {
     await productsStore.loadProducts()
-    const headers = ['sku', 'brand', 'model', 'variant', 'category', 'condition', 'price', 'cost', 'stock', 'minStock']
+    const headers = ['brand', 'model', 'variant', 'category', 'condition', 'batteryHealth', 'price', 'cost', 'stock', 'minStock']
     const rows = productsStore.products.map((p) =>
       headers.map((h) => {
         const val = p[h as keyof typeof p]
@@ -323,7 +347,7 @@ async function handleExportCsv() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `iloc-productos-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `iloc-productos-${todayIsoDate()}.csv`
     a.click()
     URL.revokeObjectURL(url)
     appStore.showToast('CSV de productos descargado', 'success')
@@ -373,7 +397,7 @@ async function handleReset() {
       productsStore.loadProducts(),
       salesStore.loadSales(),
     ])
-    appStore.showToast('Datos restablecidos con datos de prueba', 'success')
+    appStore.showToast('Datos restablecidos al estado inicial', 'success')
   } catch {
     appStore.showToast('Error al restablecer', 'error')
   }
@@ -586,6 +610,36 @@ async function handleReset() {
 
     <section class="rounded-xl border border-border bg-surface-raised p-6">
       <div class="mb-4 flex items-center gap-3">
+        <Printer :size="20" class="text-accent" />
+        <h2 class="text-sm font-medium text-zinc-300">Impresión</h2>
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm text-zinc-300">Imprimir automáticamente al registrar</p>
+          <p class="text-xs text-zinc-500">
+            Al registrar una venta, una devolución o un abono se abre el diálogo de impresión
+            sin tocar Imprimir. Las órdenes de compra (hoja carta) se imprimen a mano. Se
+            guarda solo en este equipo.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="autoPrint"
+          class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition"
+          :class="autoPrint ? 'bg-accent' : 'bg-surface-overlay border border-border'"
+          @click="setAutoPrint(!autoPrint)"
+        >
+          <span
+            class="inline-block h-4 w-4 transform rounded-full bg-white transition"
+            :class="autoPrint ? 'translate-x-6' : 'translate-x-1'"
+          />
+        </button>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-border bg-surface-raised p-6">
+      <div class="mb-4 flex items-center gap-3">
         <Database :size="20" class="text-accent" />
         <h2 class="text-sm font-medium text-zinc-300">Almacenamiento local</h2>
       </div>
@@ -697,6 +751,27 @@ async function handleReset() {
     </section>
 
     <section class="rounded-xl border border-border bg-surface-raised p-6">
+      <h2 class="mb-4 text-sm font-medium text-zinc-300">Catálogo</h2>
+      <button
+        type="button"
+        class="flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left text-sm text-zinc-300 transition hover:bg-surface-overlay disabled:pointer-events-none disabled:opacity-50"
+        :disabled="loadingCatalog"
+        @click="handleLoadCatalog"
+      >
+        <Smartphone :size="18" class="text-accent" />
+        <div>
+          <p class="font-medium text-zinc-200">
+            {{ loadingCatalog ? 'Cargando catálogo...' : 'Cargar catálogo de iPhone' }}
+          </p>
+          <p class="text-xs text-zinc-500">
+            Del iPhone X en adelante, cada color y capacidad, en Nuevo y Segunda mano. Agrega
+            solo las variantes que falten, sin precio ni stock; no modifica productos existentes.
+          </p>
+        </div>
+      </button>
+    </section>
+
+    <section class="rounded-xl border border-border bg-surface-raised p-6">
       <h2 class="mb-4 text-sm font-medium text-zinc-300">Respaldo y restauración</h2>
       <div class="space-y-3">
         <button
@@ -744,7 +819,7 @@ async function handleReset() {
     <section class="rounded-xl border border-danger/30 bg-danger/5 p-6">
       <h2 class="mb-2 text-sm font-medium text-danger">Zona de peligro</h2>
       <p class="mb-4 text-sm text-zinc-400">
-        Restablece la base de datos con los datos de prueba iniciales. Se perderán todos los datos actuales.
+        Restablece la base de datos al estado inicial: solo el catálogo de iPhone, sin ventas, contactos ni compras. Se perderán todos los datos actuales.
       </p>
       <button
         type="button"
@@ -752,14 +827,14 @@ async function handleReset() {
         @click="showResetConfirm = true"
       >
         <RefreshCw :size="16" />
-        Restablecer datos de prueba
+        Restablecer datos iniciales
       </button>
     </section>
 
     <ConfirmDialog
       v-model="showResetConfirm"
       title="Restablecer datos"
-      message="¿Estás seguro? Se eliminarán todos los datos y se cargarán los datos de prueba iniciales."
+      message="¿Estás seguro? Se eliminarán todos los datos y se cargará solo el catálogo de iPhone."
       confirm-label="Restablecer"
       variant="danger"
       @confirm="handleReset"

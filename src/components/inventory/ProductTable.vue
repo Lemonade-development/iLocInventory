@@ -7,13 +7,24 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  GripVertical,
+  PackageMinus,
+  Pencil,
+  Trash2,
 } from 'lucide-vue-next'
-import ProductActionsMenu from './ProductActionsMenu.vue'
+import RowActionsMenu, { type RowAction } from '@/components/common/RowActionsMenu.vue'
+import TableEmptyRow from '@/components/common/TableEmptyRow.vue'
+import { ACTIVE_ROW_CLASS } from '@/utils/table'
 import { formatCurrency } from '@/utils/format'
 import { getFileUrl } from '@/services/storage'
-import { DEFAULT_COLUMN_WIDTHS } from '@/composables/useInventoryTableLayout'
-import { CONDITION_LABELS } from '@/utils/product'
+import { COLUMN_WIDTHS } from '@/composables/useInventoryTableLayout'
+import {
+  acceptsBatteryHealth,
+  batteryHealthTextClass,
+  CONDITION_LABELS,
+  isLowStock,
+  parseBatteryHealth,
+} from '@/utils/product'
+import BatteryHealthBadge from './BatteryHealthBadge.vue'
 import { CATEGORY_LABELS } from '@/utils/category'
 import CategoryIcon from './CategoryIcon.vue'
 
@@ -22,7 +33,8 @@ const props = defineProps<{
   highlightId?: string
   selectedId?: string
   visibleColumns: InventoryTableColumn[]
-  columnWidths: Record<InventoryTableColumn, number>
+  /** Hay productos pero los filtros los ocultan todos. */
+  filtered?: boolean
 }>()
 
 const sort = defineModel<TableSortState>('sort', { required: true })
@@ -35,26 +47,38 @@ const emit = defineEmits<{
   edit: [product: Product]
   delete: [product: Product]
   adjustStock: [product: Product]
-  reorderColumns: [dragKey: InventoryTableColumn, dropKey: InventoryTableColumn]
-  resizeColumn: [key: InventoryTableColumn, width: number]
+  clearFilters: []
 }>()
 
 const imageUrls = ref<Record<string, string>>({})
-const openMenuId = ref<string | null>(null)
-const dragColumn = ref<InventoryTableColumn | null>(null)
-const dropTarget = ref<InventoryTableColumn | null>(null)
-const resizingColumn = ref<InventoryTableColumn | null>(null)
+const productActions: RowAction[] = [
+  { key: 'adjustStock', label: 'Ajustar stock', icon: PackageMinus },
+  { key: 'edit', label: 'Editar', icon: Pencil },
+  { key: 'delete', label: 'Eliminar', icon: Trash2, danger: true },
+]
+
+function runAction(product: Product, key: string) {
+  if (key === 'adjustStock') emit('adjustStock', product)
+  else if (key === 'edit') emit('edit', product)
+  else if (key === 'delete') emit('delete', product)
+}
 
 const columnDefs: Record<
   InventoryTableColumn,
   { label: string; align: 'left' | 'right' }
 > = {
   product: { label: 'Producto', align: 'left' },
-  sku: { label: 'SKU', align: 'left' },
+  batteryHealth: { label: 'Batería', align: 'left' },
   category: { label: 'Categoría', align: 'left' },
   condition: { label: 'Condición', align: 'left' },
   price: { label: 'Precio', align: 'right' },
   stock: { label: 'Stock', align: 'right' },
+}
+
+function batteryLabel(product: Product): string {
+  if (!acceptsBatteryHealth(product)) return '—'
+  const percent = parseBatteryHealth(product.batteryHealth)
+  return percent === undefined ? '—' : `${percent}%`
 }
 
 function conditionBadgeClass(condition?: string): string {
@@ -63,17 +87,9 @@ function conditionBadgeClass(condition?: string): string {
   return 'bg-surface-overlay text-zinc-500'
 }
 
-const activeColumns = computed(() => {
-  const productIdx = props.visibleColumns.indexOf('product')
-  const ordered =
-    productIdx > 0
-      ? ['product' as const, ...props.visibleColumns.filter((c) => c !== 'product')]
-      : [...props.visibleColumns]
-
-  return ordered
-    .filter((key) => props.visibleColumns.includes(key))
-    .map((key) => ({ key, ...columnDefs[key] }))
-})
+const activeColumns = computed(() =>
+  props.visibleColumns.map((key) => ({ key, ...columnDefs[key] })),
+)
 
 const colspan = computed(() => activeColumns.value.length + 2)
 
@@ -98,7 +114,7 @@ onMounted(() => {
 
 const tableMinWidth = computed(() => {
   const cols = activeColumns.value.reduce(
-    (sum, col) => sum + (props.columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTHS[col.key]),
+    (sum, col) => sum + COLUMN_WIDTHS[col.key],
     76,
   )
   return `${cols}px`
@@ -135,19 +151,9 @@ watch(() => props.products, (list) => loadImages(list), { immediate: true })
 
 onUnmounted(() => {
   Object.values(imageUrls.value).forEach((url) => URL.revokeObjectURL(url))
-  stopResize()
 })
 
-function isLowStock(product: Product): boolean {
-  return product.stock <= (product.minStock ?? 5)
-}
-
-function toggleMenu(productId: string) {
-  openMenuId.value = openMenuId.value === productId ? null : productId
-}
-
 function cycleSort(key: InventoryTableSortKey) {
-  if (resizingColumn.value) return
   const { sortBy, sortDir } = sort.value
 
   if (sortBy !== key) {
@@ -165,8 +171,7 @@ function sortIcon(key: InventoryTableSortKey) {
 }
 
 function columnWidth(key: InventoryTableColumn): string {
-  const w = props.columnWidths[key] ?? DEFAULT_COLUMN_WIDTHS[key]
-  return `${w}px`
+  return `${COLUMN_WIDTHS[key]}px`
 }
 
 function cellAlign(align: 'left' | 'right'): string {
@@ -177,92 +182,13 @@ function cellPadding(key: InventoryTableColumn): string {
   return key === 'product' ? 'py-3 pl-1.5 pr-4' : 'px-4 py-3'
 }
 
-// ─── Column resize ───────────────────────────────────────────────────────────
-
-let resizeStartX = 0
-let resizeStartWidth = 0
-let resizeKey: InventoryTableColumn | null = null
-
-function onResizeStart(key: InventoryTableColumn, event: MouseEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  resizingColumn.value = key
-  resizeKey = key
-  resizeStartX = event.clientX
-  resizeStartWidth = props.columnWidths[key] ?? DEFAULT_COLUMN_WIDTHS[key]
-  document.body.style.cursor = 'col-resize'
-  document.body.style.userSelect = 'none'
-  document.addEventListener('mousemove', onResizeMove)
-  document.addEventListener('mouseup', onResizeEnd)
-}
-
-function onResizeMove(event: MouseEvent) {
-  if (!resizeKey) return
-  const delta = event.clientX - resizeStartX
-  emit('resizeColumn', resizeKey, resizeStartWidth + delta)
-}
-
-function onResizeEnd() {
-  stopResize()
-}
-
-function stopResize() {
-  resizingColumn.value = null
-  resizeKey = null
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-  document.removeEventListener('mousemove', onResizeMove)
-  document.removeEventListener('mouseup', onResizeEnd)
-}
-
-// ─── Column reorder (drag & drop) ────────────────────────────────────────────
-
-function onDragStart(key: InventoryTableColumn, event: DragEvent) {
-  if (key === 'product') {
-    event.preventDefault()
-    return
-  }
-  dragColumn.value = key
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', key)
-  }
-}
-
-function onDragOver(key: InventoryTableColumn, event: DragEvent) {
-  if (key === 'product' || !dragColumn.value || dragColumn.value === key) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  dropTarget.value = key
-}
-
-function onDragLeave(key: InventoryTableColumn) {
-  if (dropTarget.value === key) dropTarget.value = null
-}
-
-function onDrop(key: InventoryTableColumn, event: DragEvent) {
-  event.preventDefault()
-  if (!dragColumn.value || key === 'product' || dragColumn.value === key) return
-  emit('reorderColumns', dragColumn.value, key)
-  dragColumn.value = null
-  dropTarget.value = null
-}
-
-function onDragEnd() {
-  dragColumn.value = null
-  dropTarget.value = null
-}
-
 function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
   const isActive = sort.value.sortBy === key
-  const isDrop = dropTarget.value === key
-  const isDragging = dragColumn.value === key
   return [
-    'group relative select-none px-2 py-3 font-medium transition',
+    'group select-none font-medium transition',
+    cellPadding(key),
     align === 'right' ? 'text-right' : 'text-left',
     isActive ? 'text-accent' : 'text-zinc-500 hover:text-zinc-300',
-    isDrop ? 'bg-accent/10 ring-1 ring-inset ring-accent/40' : '',
-    isDragging ? 'opacity-40' : '',
   ]
 }
 </script>
@@ -294,25 +220,11 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
             v-for="col in activeColumns"
             :key="col.key"
             :class="headerClasses(col.key, col.align)"
-            @dragover="onDragOver(col.key, $event)"
-            @dragleave="onDragLeave(col.key)"
-            @drop="onDrop(col.key, $event)"
           >
             <div
-              class="flex items-center gap-1 pr-2"
+              class="flex items-center"
               :class="col.align === 'right' ? 'justify-end' : 'justify-start'"
             >
-              <span
-                v-if="col.key !== 'product'"
-                draggable="true"
-                class="shrink-0 cursor-grab rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-surface-overlay active:cursor-grabbing group-hover:opacity-100"
-                title="Arrastrar para reordenar"
-                @dragstart="onDragStart(col.key, $event)"
-                @dragend="onDragEnd"
-                @mousedown.stop
-              >
-                <GripVertical :size="12" />
-              </span>
               <button
                 type="button"
                 class="inline-flex items-center gap-1.5"
@@ -331,11 +243,6 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
                 />
               </button>
             </div>
-            <div
-              class="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize transition hover:bg-accent/60"
-              :class="resizingColumn === col.key ? 'bg-accent' : 'bg-transparent'"
-              @mousedown="onResizeStart(col.key, $event)"
-            />
           </th>
         </tr>
       </thead>
@@ -345,8 +252,7 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
           :key="product.id"
           class="cursor-pointer transition hover:bg-surface-overlay/50"
           :class="{
-            'bg-accent/5 ring-1 ring-inset ring-accent/30':
-              highlightId === product.id || selectedId === product.id,
+            [ACTIVE_ROW_CLASS]: highlightId === product.id || selectedId === product.id,
             'bg-accent/10': selectedIds.includes(product.id),
           }"
           @click="emit('select', product)"
@@ -359,13 +265,7 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
             />
           </td>
           <td class="py-3 px-1.5" @click.stop>
-            <ProductActionsMenu
-              :open="openMenuId === product.id"
-              @toggle="toggleMenu(product.id)"
-              @adjust-stock="emit('adjustStock', product)"
-              @edit="emit('edit', product)"
-              @delete="emit('delete', product)"
-            />
+            <RowActionsMenu :items="productActions" @select="runAction(product, $event)" />
           </td>
           <td
             v-for="col in activeColumns"
@@ -393,22 +293,36 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
                 <p v-if="product.variant" class="truncate text-xs text-zinc-500">
                   {{ product.variant }}
                 </p>
-                <span
-                  v-if="product.condition"
-                  class="mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium"
-                  :class="conditionBadgeClass(product.condition)"
+                <div
+                  v-if="product.condition || acceptsBatteryHealth(product)"
+                  class="mt-1 flex flex-wrap items-center gap-1"
                 >
-                  {{ CONDITION_LABELS[product.condition] }}
-                </span>
+                  <span
+                    v-if="product.condition"
+                    class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="conditionBadgeClass(product.condition)"
+                  >
+                    {{ CONDITION_LABELS[product.condition] }}
+                  </span>
+                  <BatteryHealthBadge
+                    v-if="acceptsBatteryHealth(product)"
+                    :health="product.batteryHealth"
+                  />
+                </div>
               </div>
             </div>
 
-            <!-- SKU -->
+            <!-- Batería -->
             <span
-              v-else-if="col.key === 'sku'"
-              class="block truncate font-mono text-xs text-zinc-400"
+              v-else-if="col.key === 'batteryHealth'"
+              class="text-sm font-medium"
+              :class="
+                acceptsBatteryHealth(product) && parseBatteryHealth(product.batteryHealth) !== undefined
+                  ? batteryHealthTextClass(parseBatteryHealth(product.batteryHealth)!)
+                  : 'text-zinc-600'
+              "
             >
-              {{ product.sku ?? '—' }}
+              {{ batteryLabel(product) }}
             </span>
 
             <!-- Categoría -->
@@ -457,11 +371,13 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
             </span>
           </td>
         </tr>
-        <tr v-if="products.length === 0">
-          <td :colspan="colspan" class="px-4 py-12 text-center text-zinc-500">
-            No se encontraron productos
-          </td>
-        </tr>
+        <TableEmptyRow
+          v-if="products.length === 0"
+          :colspan="colspan"
+          :filtered="!!filtered"
+          empty-text="No hay productos registrados"
+          @clear="emit('clearFilters')"
+        />
       </tbody>
     </table>
   </div>

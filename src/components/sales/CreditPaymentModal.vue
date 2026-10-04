@@ -2,9 +2,10 @@
 import { ref, computed, watch } from 'vue'
 import type { Sale } from '@/types'
 import AppModal from '@/components/common/AppModal.vue'
+import CreditPaymentCompletedModal from './CreditPaymentCompletedModal.vue'
 import { useSalesStore } from '@/stores/sales'
 import { useAppStore } from '@/stores/app'
-import { formatCurrency } from '@/utils/format'
+import { formatCurrency, todayIsoDate } from '@/utils/format'
 
 const props = defineProps<{
   sale: Sale | null
@@ -22,7 +23,12 @@ const appStore = useAppStore()
 const amount = ref<number>(0)
 const nextDueDate = ref<string>('')
 const saving = ref(false)
-const today = new Date().toISOString().slice(0, 10)
+const today = todayIsoDate()
+
+// Abono recién registrado: alimenta la pantalla con Imprimir comprobante.
+const completedSale = ref<Sale | null>(null)
+const completedIndex = ref<number | null>(null)
+const showCompleted = ref(false)
 
 const balance = computed(() => props.sale?.creditBalance ?? 0)
 const remaining = computed(() => Math.max(balance.value - (amount.value || 0), 0))
@@ -62,9 +68,11 @@ async function confirm() {
       amount.value,
       isPartial.value ? nextDueDate.value : undefined,
     )
-    appStore.showToast('Pago registrado', 'success')
     emit('saved', updated)
     open.value = false
+    completedSale.value = updated
+    completedIndex.value = (updated.creditPayments?.length ?? 1) - 1
+    showCompleted.value = true
   } catch (e) {
     appStore.showToast(e instanceof Error ? e.message : 'Error al registrar el pago', 'error')
   } finally {
@@ -141,6 +149,11 @@ async function confirm() {
       </div>
     </template>
   </AppModal>
+  <CreditPaymentCompletedModal
+    v-model="showCompleted"
+    :sale="completedSale"
+    :payment-index="completedIndex"
+  />
 </template>
 
 <style scoped>

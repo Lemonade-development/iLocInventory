@@ -7,6 +7,7 @@ import {
   type ExportData,
 } from '@/services/storage'
 import { useCurrency } from '@/composables/useCurrency'
+import { todayIsoDate } from '@/utils/format'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 
 const AUTO_KEY = 'iloc-cloud-auto-backup'
@@ -172,7 +173,7 @@ export function useCloudBackup() {
 
     try {
       const data = await buildBackupData()
-      const filename = `iloc-backup-${new Date().toISOString().slice(0, 10)}.json`
+      const filename = `iloc-backup-${todayIsoDate()}.json`
       const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
       const writable = await fileHandle.createWritable()
       await writable.write(JSON.stringify(data, null, 2))

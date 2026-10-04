@@ -196,17 +196,26 @@ export async function clearBackupFolderHandle(): Promise<void> {
 
 // ─── Products ───────────────────────────────────────────────────────────────
 
+function withoutSku<T extends object>(record: T): T {
+  if (!('sku' in record)) return record
+  const copy = { ...record }
+  delete (copy as { sku?: unknown }).sku
+  return copy
+}
+
 export async function getAllProducts(): Promise<Product[]> {
-  return db.products.orderBy('updatedAt').reverse().toArray()
+  const products = await db.products.orderBy('updatedAt').reverse().toArray()
+  return products.map(withoutSku)
 }
 
 export async function getProductById(id: string): Promise<Product | undefined> {
-  return db.products.get(id)
+  const product = await db.products.get(id)
+  return product ? withoutSku(product) : undefined
 }
 
 export async function saveProduct(product: Product): Promise<void> {
   assertUnlocked()
-  await db.products.put(product)
+  await db.products.put(withoutSku(product))
 }
 
 export async function deleteProduct(id: string): Promise<void> {
@@ -482,11 +491,14 @@ export async function exportAllData(): Promise<ExportData> {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    products,
+    products: products.map(withoutSku),
     sales,
     inventoryMovements,
     contacts,
-    purchaseOrders,
+    purchaseOrders: purchaseOrders.map((order) => ({
+      ...order,
+      items: order.items.map(withoutSku),
+    })),
   }
 }
 
@@ -509,7 +521,7 @@ export async function importAllData(data: ExportData, replace = true): Promise<v
           db.purchaseOrders.clear(),
         ])
       }
-      await db.products.bulkPut(data.products)
+      await db.products.bulkPut(data.products.map(withoutSku))
       await db.sales.bulkPut(data.sales)
       await db.inventoryMovements.bulkPut(data.inventoryMovements)
       if (data.contacts?.length) await db.contacts.bulkPut(data.contacts)

@@ -1,10 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
-import { X, User, Phone, Calendar, StickyNote, Pencil, Wallet, RotateCcw, FileDown } from 'lucide-vue-next'
+import { X, User, Phone, Calendar, StickyNote, Pencil, KeyRound, Wallet, RotateCcw } from 'lucide-vue-next'
 import type { Sale } from '@/types'
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/format'
-import { downloadReturnReceipt } from '@/services/pdf'
-import SalePdfButton from './SalePdfButton.vue'
+import { imeiDisplayLines } from '@/utils/imei'
+import { saleNoteProductName } from '@/utils/product'
+import {
+  downloadCreditPaymentReceipt,
+  downloadReturnReceipt,
+  downloadSaleReceipt,
+  printCreditPaymentReceipt,
+  printReturnReceipt,
+  printSaleReceipt,
+} from '@/services/pdfDownload'
+import DocumentActions from '@/components/common/DocumentActions.vue'
+import AppleAccountSummary from './AppleAccountSummary.vue'
 import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 
 const props = defineProps<{
@@ -64,7 +74,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   <Teleport to="body">
     <Transition name="drawer">
       <div v-if="open && sale" class="fixed inset-0 z-50 flex justify-end">
-        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="open = false" />
+        <div class="absolute inset-0 bg-black/60" @click="open = false" />
 
         <aside
           class="relative flex h-full w-full max-w-md flex-col border-l border-border bg-surface-raised shadow-2xl"
@@ -137,9 +147,16 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
               <div class="space-y-3">
                 <div v-for="item in sale.items" :key="item.productId" class="flex justify-between gap-3 text-sm">
                   <div class="min-w-0">
-                    <p class="text-zinc-100">{{ item.productName }}</p>
+                    <p class="text-zinc-100">{{ saleNoteProductName(item.productName) }}</p>
                     <p class="text-xs text-zinc-500">
                       {{ item.quantity }} × {{ formatCurrency(item.unitPrice) }}
+                    </p>
+                    <p
+                      v-for="line in imeiDisplayLines(item.imeis)"
+                      :key="line"
+                      class="font-mono text-xs text-zinc-400"
+                    >
+                      {{ line }}
                     </p>
                   </div>
                   <span class="shrink-0 font-medium text-zinc-200">{{ formatCurrency(item.subtotal) }}</span>
@@ -155,9 +172,16 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
               <div class="space-y-2">
                 <div v-for="t in sale.tradeInItems" :key="t.productId" class="flex justify-between gap-3 text-sm">
                   <div class="min-w-0">
-                    <p class="text-zinc-100">{{ t.productName }}</p>
+                    <p class="text-zinc-100">{{ saleNoteProductName(t.productName) }}</p>
                     <p class="text-xs text-zinc-500">
                       {{ t.quantity }} × {{ formatCurrency(t.unitValue) }}
+                    </p>
+                    <p
+                      v-for="line in imeiDisplayLines(t.imeis)"
+                      :key="line"
+                      class="font-mono text-xs text-zinc-400"
+                    >
+                      {{ line }}
                     </p>
                   </div>
                   <span class="shrink-0 font-medium text-success">−{{ formatCurrency(t.unitValue * t.quantity) }}</span>
@@ -237,10 +261,16 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
                   <div
                     v-for="(p, idx) in sale.creditPayments"
                     :key="idx"
-                    class="flex justify-between text-xs text-zinc-400"
+                    class="flex items-center justify-between gap-2 text-xs text-zinc-400"
                   >
                     <span>{{ formatDate(p.date) }}</span>
-                    <span class="text-zinc-300">{{ formatCurrency(p.amount) }}</span>
+                    <span class="ml-auto text-zinc-300">{{ formatCurrency(p.amount) }}</span>
+                    <DocumentActions
+                      compact
+                      document-name="comprobante de abono"
+                      @print="printCreditPaymentReceipt(sale, idx)"
+                      @download="downloadCreditPaymentReceipt(sale, idx)"
+                    />
                   </div>
                 </div>
               </div>
@@ -262,18 +292,16 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
                 >
                   <div class="flex items-center justify-between">
                     <span class="text-xs text-zinc-400">{{ formatDateTime(ret.date) }}</span>
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 rounded p-1 text-xs text-zinc-400 transition hover:text-accent"
-                      title="Nota de devolución PDF"
-                      @click="downloadReturnReceipt(sale, ret)"
-                    >
-                      <FileDown :size="14" /> Nota
-                    </button>
+                    <DocumentActions
+                      compact
+                      document-name="nota de devolución"
+                      @print="printReturnReceipt(sale, ret)"
+                      @download="downloadReturnReceipt(sale, ret)"
+                    />
                   </div>
                   <div v-for="it in ret.items" :key="it.productId" class="mt-1 flex justify-between text-sm">
                     <span class="min-w-0 truncate text-zinc-300">
-                      {{ it.productName }} × {{ it.quantity }}
+                      {{ saleNoteProductName(it.productName) }} × {{ it.quantity }}
                       <span v-if="!it.restocked" class="text-danger">· sin reingresar</span>
                     </span>
                     <span class="shrink-0 text-zinc-400">{{ formatCurrency(it.refundPerUnit * it.quantity) }}</span>
@@ -287,6 +315,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
                   </p>
                 </div>
               </div>
+            </section>
+
+            <!-- Cuenta Apple -->
+            <section v-if="sale.appleAccount" class="border-b border-border px-6 py-5">
+              <h3 class="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <KeyRound :size="13" />
+                Cuenta Apple
+              </h3>
+              <AppleAccountSummary :key="sale.id" :account="sale.appleAccount" />
             </section>
 
             <!-- Notas -->
@@ -325,7 +362,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
               >
                 <RotateCcw :size="15" /> Devolución
               </button>
-              <SalePdfButton :sale="sale" label="Ticket" />
+              <DocumentActions
+                document-name="ticket"
+                @print="printSaleReceipt(sale)"
+                @download="downloadSaleReceipt(sale)"
+              />
             </div>
           </div>
         </aside>
