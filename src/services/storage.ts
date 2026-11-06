@@ -213,9 +213,18 @@ export async function getProductById(id: string): Promise<Product | undefined> {
   return product ? withoutSku(product) : undefined
 }
 
+/**
+ * Copia plana (sin proxies reactivos de Vue) apta para IndexedDB. Un producto
+ * con `specs` anidado (p. ej. del catálogo de iPhone) llega como Proxy y
+ * `put` falla con DataCloneError.
+ */
+function toPlainProduct(product: Product): Product {
+  return withoutSku(JSON.parse(JSON.stringify(product)) as Product)
+}
+
 export async function saveProduct(product: Product): Promise<void> {
   assertUnlocked()
-  await db.products.put(withoutSku(product))
+  await db.products.put(toPlainProduct(product))
 }
 
 export async function deleteProduct(id: string): Promise<void> {
@@ -341,7 +350,7 @@ export async function executeReceivePurchaseOrder(data: ReceivePurchaseOrderData
   const now = new Date().toISOString()
   await db.transaction('rw', db.products, db.inventoryMovements, db.purchaseOrders, async () => {
     for (const product of data.newProducts) {
-      await db.products.put(product)
+      await db.products.put(toPlainProduct(product))
     }
     for (const u of data.stockUpdates) {
       await db.products.update(u.productId, {
@@ -487,7 +496,7 @@ export interface StockAdjustmentData {
 export async function executeStockAdjustment(data: StockAdjustmentData): Promise<void> {
   assertUnlocked()
   await db.transaction('rw', db.products, db.inventoryMovements, async () => {
-    await db.products.put(data.product)
+    await db.products.put(toPlainProduct(data.product))
     await db.inventoryMovements.put(data.movement)
   })
 }
