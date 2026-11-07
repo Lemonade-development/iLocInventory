@@ -198,6 +198,30 @@ export async function unlockWithPin(password: string): Promise<'ok' | 'invalid' 
   return 'ok'
 }
 
+/**
+ * Confirma la contraseña para una acción sensible (p. ej. borrar las ventas).
+ * Comparte el contador de intentos con el desbloqueo: 5 fallos bloquean 30 s.
+ */
+export async function verifyPassword(password: string): Promise<'ok' | 'invalid' | 'lockout'> {
+  if (!isUnlocked()) throw new Error('La aplicación está bloqueada')
+  if (getLockoutRemainingMs() > 0) return 'lockout'
+
+  const config = await readAuthConfig()
+  if (!config) throw new Error('No hay contraseña configurada')
+
+  if (!(await verifyPasswordAgainstConfig(password, config))) {
+    failedAttempts++
+    if (failedAttempts >= MAX_ATTEMPTS) {
+      failedAttempts = 0
+      lockedUntil = Date.now() + LOCKOUT_MS
+    }
+    return 'invalid'
+  }
+
+  failedAttempts = 0
+  return 'ok'
+}
+
 export async function changePin(
   currentPassword: string,
   newPassword: string,

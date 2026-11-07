@@ -270,6 +270,8 @@ export interface ProductFilters {
   category: ProductCategory | ''
   condition: ProductCondition | ''
   lowStockOnly: boolean
+  /** Solo productos con stock disponible (stock > 0). */
+  inStockOnly: boolean
   sortBy: InventoryTableSortKey | null
   sortDir: 'asc' | 'desc' | null
 }

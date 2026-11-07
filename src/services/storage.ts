@@ -488,6 +488,21 @@ export async function executeReturnTransaction(data: ReturnTransactionData): Pro
   })
 }
 
+/**
+ * Borra todas las ventas (con sus abonos y devoluciones) y los movimientos de
+ * inventario ligados a ellas. No toca el stock, los productos ni los contactos.
+ * Devuelve cuántas ventas se borraron.
+ */
+export async function deleteAllSales(): Promise<number> {
+  assertUnlocked()
+  return db.transaction('rw', db.sales, db.inventoryMovements, async () => {
+    const count = await db.sales.count()
+    await db.sales.clear()
+    await db.inventoryMovements.filter((m) => Boolean(m.relatedSaleId)).delete()
+    return count
+  })
+}
+
 export interface StockAdjustmentData {
   product: Product
   movement: InventoryMovement

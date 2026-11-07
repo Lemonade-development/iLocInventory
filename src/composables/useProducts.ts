@@ -44,6 +44,10 @@ export function useProducts() {
       result = result.filter(isLowStock)
     }
 
+    if (filters.inStockOnly) {
+      result = result.filter((p) => p.stock > 0)
+    }
+
     if (filters.sortBy && filters.sortDir) {
       const dir = filters.sortDir === 'asc' ? 1 : -1
       result.sort((a, b) => compareProducts(a, b, filters.sortBy!, dir))

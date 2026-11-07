@@ -38,6 +38,7 @@ const filters = ref<ProductFilters>({
   category: '',
   condition: '',
   lowStockOnly: false,
+  inStockOnly: false,
   sortBy: null,
   sortDir: null,
 })
@@ -48,7 +49,8 @@ const hasActiveFilters = computed(
     !!filters.value.brand ||
     !!filters.value.category ||
     !!filters.value.condition ||
-    filters.value.lowStockOnly,
+    filters.value.lowStockOnly ||
+    filters.value.inStockOnly,
 )
 
 /** Vuelve a los filtros de inicio; el orden elegido se mantiene. */
@@ -59,6 +61,7 @@ function clearFilters() {
     category: '',
     condition: '',
     lowStockOnly: false,
+    inStockOnly: false,
   })
 }
 
@@ -281,6 +284,11 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
           <option value="nuevo">Nuevo</option>
           <option value="segunda_mano">Segunda mano</option>
         </select>
+        <label class="flex items-center gap-2 text-sm text-zinc-400">
+          <input v-model="filters.inStockOnly" type="checkbox" />
+          <Filter :size="14" />
+          Con stock
+        </label>
         <label class="flex items-center gap-2 text-sm text-zinc-400">
           <input v-model="filters.lowStockOnly" type="checkbox" />
           <Filter :size="14" />

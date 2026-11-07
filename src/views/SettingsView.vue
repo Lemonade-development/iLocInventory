@@ -20,6 +20,7 @@ import {
   Smartphone,
   FileSpreadsheet,
   RefreshCw,
+  Trash2,
 } from 'lucide-vue-next'
 import { useStorage } from '@/composables/useStorage'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
@@ -38,7 +39,9 @@ import { useAppStore } from '@/stores/app'
 import { useAuth } from '@/composables/useAuth'
 import AppModal from '@/components/common/AppModal.vue'
 import PasswordInputForm from '@/components/auth/PasswordInputForm.vue'
-import { PASSWORD_REQUIREMENTS_HINT, USERNAME_REQUIREMENTS_HINT } from '@/services/auth'
+import { PASSWORD_REQUIREMENTS_HINT, USERNAME_REQUIREMENTS_HINT, verifyPassword } from '@/services/auth'
+import { deleteAllSales } from '@/services/storage'
+import { useInventoryStore } from '@/stores/inventory'
 import UsernameInputForm from '@/components/auth/UsernameInputForm.vue'
 import type { ExportData } from '@/services/storage'
 import { addMissingIphoneCatalog } from '@/services/seed'
@@ -237,6 +240,48 @@ async function submitUsernameChange(value: string): Promise<void> {
     )
   } finally {
     savingUsername.value = false
+  }
+}
+
+// ─── Borrar datos de ventas (requiere contraseña) ─────────────────────────────
+const inventoryStore = useInventoryStore()
+const showDeleteSalesModal = ref(false)
+const deleteSalesPassword = ref('')
+const deletingSales = ref(false)
+
+function openDeleteSalesModal(): void {
+  deleteSalesPassword.value = ''
+  showDeleteSalesModal.value = true
+}
+
+function closeDeleteSalesModal(): void {
+  showDeleteSalesModal.value = false
+  deleteSalesPassword.value = ''
+  deletingSales.value = false
+}
+
+async function submitDeleteSales(password: string): Promise<void> {
+  deletingSales.value = true
+  try {
+    const result = await verifyPassword(password)
+    if (result === 'lockout') {
+      appStore.showToast('Demasiados intentos. Espera 30 segundos.', 'error')
+      deleteSalesPassword.value = ''
+      return
+    }
+    if (result === 'invalid') {
+      appStore.showToast('Contraseña incorrecta', 'error')
+      deleteSalesPassword.value = ''
+      return
+    }
+    const deleted = await deleteAllSales()
+    await Promise.all([salesStore.loadSales(), inventoryStore.loadMovements()])
+    appStore.showToast(`${deleted} venta(s) eliminada(s)`, 'success')
+    closeDeleteSalesModal()
+  } catch (e) {
+    appStore.showToast(e instanceof Error ? e.message : 'No se pudieron borrar las ventas', 'error')
+  } finally {
+    deletingSales.value = false
   }
 }
 
@@ -957,6 +1002,25 @@ async function handleImportJson(event: Event) {
       </div>
     </section>
 
+    <section class="rounded-xl border border-danger/40 bg-surface-raised p-6">
+      <div class="mb-4 flex items-center gap-3">
+        <Trash2 :size="20" class="text-danger" />
+        <h2 class="text-sm font-medium text-zinc-300">Zona de peligro</h2>
+      </div>
+      <p class="mb-4 text-sm text-zinc-500">
+        Borra todas las ventas, con sus abonos y devoluciones. El inventario, el stock, los
+        contactos y las compras no cambian. No se puede deshacer: exporta un respaldo JSON antes.
+      </p>
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+        @click="openDeleteSalesModal"
+      >
+        <Trash2 :size="16" />
+        Borrar datos de ventas
+      </button>
+    </section>
+
     <AppModal v-model="showChangeUsernameModal" title="Cambiar usuario" size="sm">
       <p class="mb-4 text-sm text-zinc-500">{{ USERNAME_REQUIREMENTS_HINT }}</p>
       <UsernameInputForm
@@ -1006,6 +1070,30 @@ async function handleImportJson(event: Event) {
           type="button"
           class="rounded-lg border border-border px-4 py-2 text-sm text-zinc-400 transition hover:bg-surface-overlay"
           @click="closeChangePasswordModal"
+        >
+          Cancelar
+        </button>
+      </div>
+    </AppModal>
+    <AppModal v-model="showDeleteSalesModal" title="Borrar datos de ventas" size="sm">
+      <p class="mb-4 text-sm text-zinc-500">
+        Se borrarán todas las ventas de forma permanente. Escribe tu contraseña para confirmar.
+      </p>
+      <PasswordInputForm
+        v-model="deleteSalesPassword"
+        label="Contraseña"
+        submit-label="Borrar ventas"
+        :busy="deletingSales"
+        :validate-format="false"
+        hint=""
+        input-id="delete-sales-password"
+        @submit="submitDeleteSales"
+      />
+      <div class="mt-4 flex justify-end">
+        <button
+          type="button"
+          class="rounded-lg border border-border px-4 py-2 text-sm text-zinc-400 transition hover:bg-surface-overlay"
+          @click="closeDeleteSalesModal"
         >
           Cancelar
         </button>
