@@ -7,12 +7,16 @@ import ToastNotification from './ToastNotification.vue'
 import { useStorage } from '@/composables/useStorage'
 import { useStoreInfo } from '@/composables/useStoreInfo'
 import LoadingSpinner from './LoadingSpinner.vue'
+import NewSaleButton from './NewSaleButton.vue'
 
 const route = useRoute()
 const { ready, loading } = useStorage()
 const { displayName } = useStoreInfo()
 
 const pageTitle = computed(() => (route.meta.title as string) ?? displayName())
+// Pantallas donde no se muestra el atajo de Nueva venta (incluida la propia Nueva venta).
+const HIDE_NEW_SALE_BUTTON = new Set(['sales', 'sales-history', 'inventory', 'settings'])
+const showNewSaleButton = computed(() => !HIDE_NEW_SALE_BUTTON.has(String(route.name)))
 </script>
 
 <template>
@@ -33,11 +37,30 @@ const pageTitle = computed(() => (route.meta.title as string) ?? displayName())
         </div>
       </header>
 
-      <main class="flex-1 overflow-y-auto p-6">
+      <!-- Con el botón visible, espacio extra abajo para que no tape la paginación ni el final de la página. -->
+      <main class="flex-1 overflow-y-auto p-6" :class="{ 'pb-24': showNewSaleButton }">
         <slot />
       </main>
+
+      <Transition name="fab">
+        <NewSaleButton v-if="showNewSaleButton" />
+      </Transition>
     </div>
 
-    <ToastNotification />
+    <!-- El aviso también va abajo a la derecha: con el botón visible, se apila encima de él. -->
+    <ToastNotification :above-fab="showNewSaleButton" />
   </div>
 </template>
+<style scoped>
+.fab-enter-active,
+.fab-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.fab-enter-from,
+.fab-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+</style>

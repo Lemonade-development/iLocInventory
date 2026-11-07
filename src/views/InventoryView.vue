@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Filter, Upload } from 'lucide-vue-next'
 import InventoryImportModal from '@/components/inventory/InventoryImportModal.vue'
 import InventoryBulkBar from '@/components/inventory/InventoryBulkBar.vue'
@@ -23,6 +23,7 @@ import { useInventoryTableLayout } from '@/composables/useInventoryTableLayout'
 import { ALL_CATEGORIES, CATEGORY_LABELS } from '@/utils/category'
 
 const route = useRoute()
+const router = useRouter()
 const productsStore = useProductsStore()
 const inventoryStore = useInventoryStore()
 const appStore = useAppStore()
@@ -144,6 +145,11 @@ function openEdit(product: Product) {
   closeDetail()
   editingProduct.value = product
   showForm.value = true
+}
+
+/** Abre Nueva venta con el producto ya en el carrito (mismo mecanismo que el buscador global). */
+function sellProduct(product: Product) {
+  router.push({ name: 'sales', query: { add: product.id } })
 }
 
 function openAdjust(product: Product) {
@@ -355,6 +361,7 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
       @edit="openEdit"
       @delete="openDelete"
       @adjust-stock="openAdjust"
+      @sell="sellProduct"
     />
     <TablePagination
       v-if="!productsStore.loading"
@@ -370,6 +377,7 @@ const highlightId = computed(() => route.query.highlight as string | undefined)
       @edit="openEdit"
       @adjust-stock="openAdjust"
       @delete="openDelete"
+      @sell="sellProduct"
     />
 
     <ProductFormModal

@@ -18,7 +18,7 @@ import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
 import { ALL_CATEGORIES, CATEGORY_LABELS } from '@/utils/category'
 import { CONDITION_LABELS } from '@/utils/product'
-import { formatCurrency } from '@/utils/format'
+import { formatCurrency, toDateInputValue, todayIsoDate } from '@/utils/format'
 import { downloadPurchaseOrderTemplate, parsePurchaseOrderLines } from '@/services/purchaseOrderImport'
 
 const props = defineProps<{ order?: PurchaseOrder | null }>()
@@ -46,6 +46,7 @@ type Row = {
 
 const selectedSupplierId = ref<string | undefined>()
 const supplierQuery = ref('')
+const orderDate = ref('')
 const expectedDate = ref('')
 const notes = ref('')
 const rows = ref<Row[]>([])
@@ -78,6 +79,7 @@ function reset() {
   if (props.order) {
     selectedSupplierId.value = props.order.supplierId
     supplierQuery.value = props.order.supplierName
+    orderDate.value = toDateInputValue(props.order.date)
     expectedDate.value = props.order.expectedDate ?? ''
     notes.value = props.order.notes ?? ''
     rows.value = props.order.items.map((i) => ({
@@ -90,6 +92,7 @@ function reset() {
   } else {
     selectedSupplierId.value = undefined
     supplierQuery.value = ''
+    orderDate.value = todayIsoDate()
     expectedDate.value = ''
     notes.value = ''
     rows.value = [emptyRow()]
@@ -243,6 +246,14 @@ function submit() {
       notes: r.notes?.trim() || undefined,
     }))
 
+  if (!orderDate.value) {
+    appStore.showToast('Indica la fecha del pedido', 'error')
+    return
+  }
+  if (orderDate.value > todayIsoDate()) {
+    appStore.showToast('La fecha del pedido no puede ser futura', 'error')
+    return
+  }
   if (!supplierName.value) {
     appStore.showToast('Selecciona o escribe un proveedor', 'error')
     return
@@ -253,6 +264,7 @@ function submit() {
   }
 
   emit('save', {
+    date: orderDate.value,
     supplierId: selectedSupplier.value?.id,
     supplierName: supplierName.value,
     expectedDate: expectedDate.value || undefined,
@@ -333,7 +345,11 @@ function submit() {
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div>
+          <label class="mb-1 block text-sm text-zinc-400">Fecha del pedido *</label>
+          <input v-model="orderDate" type="date" :max="todayIsoDate()" class="input-field" />
+        </div>
         <div>
           <label class="mb-1 block text-sm text-zinc-400">Fecha estimada de entrega</label>
           <input v-model="expectedDate" type="date" class="input-field" />

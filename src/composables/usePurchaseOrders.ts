@@ -16,6 +16,7 @@ import {
   savePurchaseOrder,
 } from '@/services/storage'
 import { generateId } from '@/utils/id'
+import { fromDateInputValue } from '@/utils/format'
 import { productMatchKey } from '@/utils/product'
 import { useCurrency } from '@/composables/useCurrency'
 
@@ -98,7 +99,7 @@ export function usePurchaseOrders() {
     const order: PurchaseOrder = {
       id: generateId(),
       code: await nextPurchaseOrderCode(),
-      date: now,
+      date: data.date ? fromDateInputValue(data.date, now) : now,
       supplierId: data.supplierId,
       supplierName: data.supplierName,
       items,
@@ -127,6 +128,7 @@ export function usePurchaseOrders() {
     const { subtotal, total } = computeTotals(items)
     const updated: PurchaseOrder = {
       ...existing,
+      date: data.date ? fromDateInputValue(data.date, existing.date) : existing.date,
       supplierId: data.supplierId,
       supplierName: data.supplierName,
       items,
