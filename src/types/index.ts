@@ -220,6 +220,8 @@ export interface PurchaseOrder {
 }
 
 export interface PurchaseOrderFormData {
+  /** Fecha del pedido (YYYY-MM-DD). Si se omite: hoy al crear, la original al editar. */
+  date?: string
   supplierId?: string
   supplierName: string
   expectedDate?: string

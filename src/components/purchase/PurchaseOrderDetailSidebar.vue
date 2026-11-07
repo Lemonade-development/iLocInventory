@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trackOverlay } from '@/composables/useOverlays'
 import { onMounted, onUnmounted } from 'vue'
 import { X, Truck, Calendar, StickyNote, Package } from 'lucide-vue-next'
 import type { PurchaseOrder } from '@/types'
@@ -14,11 +15,12 @@ import { downloadPurchaseOrder, printPurchaseOrder } from '@/services/pdfDownloa
 import DocumentActions from '@/components/common/DocumentActions.vue'
 import UsdEquivalent from '@/components/common/UsdEquivalent.vue'
 
-defineProps<{
+const props = defineProps<{
   order: PurchaseOrder | null
 }>()
 
 const open = defineModel<boolean>({ required: true })
+trackOverlay('drawer', () => open.value && !!props.order)
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && open.value) open.value = false

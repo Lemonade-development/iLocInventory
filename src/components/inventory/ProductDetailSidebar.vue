@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trackOverlay } from '@/composables/useOverlays'
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import {
   X,
@@ -9,6 +10,7 @@ import {
   TrendingUp,
   Hash,
   Calendar,
+  ShoppingCart,
 } from 'lucide-vue-next'
 import type { Product, InventoryMovement } from '@/types'
 import { formatCurrency, formatDateTime } from '@/utils/format'
@@ -32,11 +34,13 @@ const props = defineProps<{
 }>()
 
 const open = defineModel<boolean>({ required: true })
+trackOverlay('drawer', () => open.value && !!props.product)
 
 const emit = defineEmits<{
   edit: [product: Product]
   adjustStock: [product: Product]
   delete: [product: Product]
+  sell: [product: Product]
 }>()
 
 const inventoryStore = useInventoryStore()
@@ -357,31 +361,43 @@ function detailRow(label: string, value: string | number | undefined | null) {
           </div>
 
           <!-- Acciones -->
-          <div class="flex gap-2 border-t border-border px-6 py-4">
+          <div class="space-y-2 border-t border-border px-6 py-4">
             <button
               type="button"
-              class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
-              @click="emit('adjustStock', product)"
+              class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="product.stock <= 0"
+              :title="product.stock <= 0 ? 'Sin stock disponible' : undefined"
+              @click="emit('sell', product)"
             >
-              <PackageMinus :size="16" />
-              Ajustar stock
+              <ShoppingCart :size="16" />
+              {{ product.stock > 0 ? 'Vender este producto' : 'Sin stock para vender' }}
             </button>
-            <button
-              type="button"
-              class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition hover:bg-accent-hover"
-              @click="emit('edit', product)"
-            >
-              <Pencil :size="16" />
-              Editar
-            </button>
-            <button
-              type="button"
-              class="rounded-lg border border-danger/30 p-2 text-danger transition hover:bg-danger/10"
-              title="Eliminar"
-              @click="emit('delete', product)"
-            >
-              <Trash2 :size="16" />
-            </button>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
+                @click="emit('adjustStock', product)"
+              >
+                <PackageMinus :size="16" />
+                Ajustar stock
+              </button>
+              <button
+                type="button"
+                class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-zinc-300 transition hover:bg-surface-overlay"
+                @click="emit('edit', product)"
+              >
+                <Pencil :size="16" />
+                Editar
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-danger/30 p-2 text-danger transition hover:bg-danger/10"
+                title="Eliminar"
+                @click="emit('delete', product)"
+              >
+                <Trash2 :size="16" />
+              </button>
+            </div>
           </div>
         </aside>
       </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trackOverlay } from '@/composables/useOverlays'
 import { computed, onMounted, onUnmounted } from 'vue'
 import { X, User, Phone, Calendar, StickyNote, Pencil, KeyRound, Wallet, RotateCcw } from 'lucide-vue-next'
 import type { Sale } from '@/types'
@@ -22,6 +23,7 @@ const props = defineProps<{
 }>()
 
 const open = defineModel<boolean>({ required: true })
+trackOverlay('drawer', () => open.value && !!props.sale)
 
 const emit = defineEmits<{
   edit: [sale: Sale]

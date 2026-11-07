@@ -7,7 +7,13 @@ import ContactFormModal from '@/components/contacts/ContactFormModal.vue'
 import { useSalesStore } from '@/stores/sales'
 import { useContactsStore } from '@/stores/contacts'
 import { useAppStore } from '@/stores/app'
-import { formatCurrency } from '@/utils/format'
+import {
+  formatCurrency,
+  fromDateInputValue,
+  fromDateTimeInputValue,
+  toDateInputValue,
+  toDateTimeInputValue,
+} from '@/utils/format'
 import AppleAccountFields from './AppleAccountFields.vue'
 import {
   appleAccountDraftFrom,
@@ -49,14 +55,27 @@ const showContactForm = ref(false)
 const creditDownPayment = ref<number>(0)
 const creditDueDate = ref<string>('')
 const appleAccount = ref<AppleAccountDraft>(appleAccountDraftFrom())
+const saleDate = ref('')
 const saving = ref(false)
 
 const isCredit = computed(() => props.sale?.paymentMethod === 'credito')
+// Las ventas importadas de la planilla no tienen hora real: se editan solo por día.
+const dateOnly = computed(() => !!props.sale?.importKey)
+
+function saleDateInputValue(sale: Sale): string {
+  return sale.importKey ? toDateInputValue(sale.date) : toDateTimeInputValue(sale.date)
+}
+
+const maxSaleDate = computed(() => {
+  const now = new Date().toISOString()
+  return dateOnly.value ? toDateInputValue(now) : toDateTimeInputValue(now)
+})
 
 watch(
   () => [open.value, props.sale] as const,
   ([isOpen, sale]) => {
     if (!isOpen || !sale) return
+    saleDate.value = saleDateInputValue(sale)
     items.value = sale.items.map((i) => ({
       productId: i.productId,
       productName: i.productName,
@@ -148,6 +167,21 @@ function onDownPaymentInput(event: Event) {
 
 async function save() {
   if (!props.sale) return
+  if (!saleDate.value) {
+    appStore.showToast('Indica la fecha de la venta', 'error')
+    return
+  }
+  // Sin cambios en el campo, se conserva la fecha original exacta (con segundos).
+  const dateChanged = saleDate.value !== saleDateInputValue(props.sale)
+  const newDate = !dateChanged
+    ? props.sale.date
+    : dateOnly.value
+      ? fromDateInputValue(saleDate.value, props.sale.date)
+      : fromDateTimeInputValue(saleDate.value)
+  if (dateChanged && new Date(newDate) > new Date()) {
+    appStore.showToast('La fecha de la venta no puede ser futura', 'error')
+    return
+  }
   if (!contactId.value) {
     appStore.showToast('Selecciona un contacto', 'error')
     return
@@ -172,6 +206,7 @@ async function save() {
       imeis: i.imeis,
     }))
     const patch: Partial<Sale> = {
+      date: newDate,
       contactId: contactId.value,
       customerName: contactName.value || undefined,
       customerPhone: contactPhone.value || undefined,
@@ -204,6 +239,17 @@ async function save() {
 <template>
   <AppModal v-model="open" title="Editar venta" size="lg">
     <div v-if="sale" class="space-y-5">
+      <!-- Fecha -->
+      <div>
+        <label class="mb-1.5 block text-sm text-zinc-400">Fecha de la venta *</label>
+        <input
+          v-model="saleDate"
+          :type="dateOnly ? 'date' : 'datetime-local'"
+          :max="maxSaleDate"
+          class="input-field"
+        />
+      </div>
+
       <!-- Contacto -->
       <div>
         <div class="mb-1.5 flex items-center justify-between">

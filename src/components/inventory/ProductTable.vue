@@ -10,6 +10,7 @@ import {
   PackageMinus,
   Pencil,
   Trash2,
+  ShoppingCart,
 } from 'lucide-vue-next'
 import RowActionsMenu, { type RowAction } from '@/components/common/RowActionsMenu.vue'
 import TableEmptyRow from '@/components/common/TableEmptyRow.vue'
@@ -48,18 +49,25 @@ const emit = defineEmits<{
   edit: [product: Product]
   delete: [product: Product]
   adjustStock: [product: Product]
+  sell: [product: Product]
   clearFilters: []
 }>()
 
 const imageUrls = ref<Record<string, string>>({})
+const sellAction: RowAction = { key: 'sell', label: 'Vender', icon: ShoppingCart }
 const productActions: RowAction[] = [
   { key: 'adjustStock', label: 'Ajustar stock', icon: PackageMinus },
   { key: 'edit', label: 'Editar', icon: Pencil },
   { key: 'delete', label: 'Eliminar', icon: Trash2, danger: true },
 ]
+// Sin stock no hay nada que vender: la acción no aparece.
+function actionsFor(product: Product): RowAction[] {
+  return product.stock > 0 ? [sellAction, ...productActions] : productActions
+}
 
 function runAction(product: Product, key: string) {
-  if (key === 'adjustStock') emit('adjustStock', product)
+  if (key === 'sell') emit('sell', product)
+  else if (key === 'adjustStock') emit('adjustStock', product)
   else if (key === 'edit') emit('edit', product)
   else if (key === 'delete') emit('delete', product)
 }
@@ -266,7 +274,7 @@ function headerClasses(key: InventoryTableColumn, align: 'left' | 'right') {
             />
           </td>
           <td class="py-3 px-1.5" @click.stop>
-            <RowActionsMenu :items="productActions" @select="runAction(product, $event)" />
+            <RowActionsMenu :items="actionsFor(product)" @select="runAction(product, $event)" />
           </td>
           <td
             v-for="col in activeColumns"

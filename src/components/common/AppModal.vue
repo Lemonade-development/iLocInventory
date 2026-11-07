@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trackOverlay } from '@/composables/useOverlays'
 import { X } from 'lucide-vue-next'
 
 defineProps<{
@@ -7,6 +8,7 @@ defineProps<{
 }>()
 
 const open = defineModel<boolean>({ required: true })
+trackOverlay('modal', () => open.value)
 
 const sizeClasses = {
   sm: 'max-w-md',
